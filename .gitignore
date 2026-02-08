@@ -212,3 +212,9 @@ __marimo__/
 *.ckpt
 results/
 wandb/
+
+# Track folder structure under data/, but keep actual data files out
+data/*
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
