@@ -121,6 +121,7 @@ def group_into_incidents(
     """
     Group log lines into incidents using a rolling buffer.
     Each incident contains group_size consecutive informative lines.
+    Buffer is cleared after each incident to prevent duplicates.
     """
     incidents = []
     buffer = []
@@ -130,18 +131,21 @@ def group_into_incidents(
         
         if len(buffer) >= group_size:
             # Create incident from buffer
-            incident_lines = [line for line, _ in buffer]
-            parsed_lines = [p for _, p in buffer]
-            
-            # Create incident ID using sha1 hash
-            incident_text = "\n".join(incident_lines)
-            hash_obj = hashlib.sha1(incident_text.encode('utf-8'))
-            incident_id = hash_obj.hexdigest()[:12]
+            incident_lines = [line for line, _ in buffer[:group_size]]
+            parsed_lines = [p for _, p in buffer[:group_size]]
             
             # Infer service from most common component
             components = [p["component"] for p in parsed_lines]
             most_common_component = Counter(components).most_common(1)[0][0]
             service = infer_service(most_common_component)
+            
+            # Create incident_text with service prefix
+            lines_text = "\n".join(incident_lines)
+            incident_text = f"service: {service}\n{lines_text}"
+            
+            # Create incident ID using sha1 hash of incident_text
+            hash_obj = hashlib.sha1(incident_text.encode('utf-8'))
+            incident_id = hash_obj.hexdigest()[:12]
             
             # Calculate stats
             levels_count = dict(Counter(p["level"] for p in parsed_lines))
@@ -160,8 +164,8 @@ def group_into_incidents(
             
             incidents.append(incident)
             
-            # Slide the buffer by 1 to create overlapping groups
-            buffer.pop(0)
+            # Clear the buffer completely to avoid duplicates
+            buffer = []
             
             # Check if we've reached max incidents
             if max_incidents and len(incidents) >= max_incidents:
@@ -232,6 +236,12 @@ def process_logs(
     print(f"\nGrouping into incidents (group_size={group_size})...")
     incidents = group_into_incidents(informative_lines, group_size, seed, max_incidents)
     
+    # Verify uniqueness
+    incident_ids = [inc["incident_id"] for inc in incidents]
+    unique_ids = set(incident_ids)
+    if len(unique_ids) != len(incident_ids):
+        print(f"WARNING: Found {len(incident_ids) - len(unique_ids)} duplicate incident IDs!")
+    
     # Write output
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +255,7 @@ def process_logs(
     print(f"Total lines read: {total_lines}")
     print(f"Informative lines: {len(informative_lines)}")
     print(f"Incidents generated: {len(incidents)}")
+    print(f"Unique incident IDs: {len(unique_ids)}")
     print(f"Output written to: {output_path}")
     
     return {
