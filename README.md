@@ -174,3 +174,77 @@ This script demonstrates:
 - Loading the pre-trained model and tokenizer
 - Running baseline inference on a sample incident
 - Comparing generated output to ground-truth labels
+
+## Fine-Tuning Setup
+
+### Training Pipeline
+
+The fine-tuning pipeline (`scripts/train.py`) uses the **Hugging Face Transformers Trainer API** for clean, reproducible training.
+
+**Training Process:**
+1. Load `google/flan-t5-small` base model and tokenizer
+2. Load train and validation datasets from `data/final/`
+3. Tokenize inputs (prompts) and targets (JSON responses)
+4. Configure training with optimized hyperparameters
+5. Train using Seq2SeqTrainer with automatic checkpointing
+6. Save best model based on validation loss
+
+### Dataset Splits Used
+
+- **Training**: `data/final/train.jsonl` (33 samples)
+- **Validation**: `data/final/val.jsonl` (6 samples)
+- **Test**: `data/final/test.jsonl` (9 samples - held out, not used during training)
+
+The test set is **not tokenized or used during training** - it remains completely unseen for final evaluation.
+
+### Hyperparameters
+
+**Core Training Settings:**
+- **Epochs**: 3
+- **Batch size**: 4 (train and eval)
+- **Learning rate**: 5e-5
+- **Weight decay**: 0.01
+- **Optimizer**: AdamW (default)
+
+**Sequence Lengths:**
+- **Input (prompt)**: max 512 tokens
+- **Output (response)**: max 256 tokens
+
+**Evaluation & Checkpointing:**
+- Evaluation strategy: Every epoch
+- Save strategy: Every epoch
+- Logging: Every 50 steps
+- Save only best 2 checkpoints (based on validation loss)
+- Load best model at end: Yes
+
+**Reproducibility:**
+- Fixed random seed: 42
+- Deterministic tokenization and data loading
+
+### Why This Setup is Reliable
+
+1. **Stratified Splitting**: Ensures balanced severity distribution across train/val/test
+2. **Fixed Seed**: All random operations use seed=42 for reproducibility
+3. **Validation-Based Selection**: Best model chosen by validation loss, not training loss
+4. **Standard Trainer API**: Uses well-tested Hugging Face infrastructure
+5. **Automatic Checkpointing**: Prevents loss of progress and enables recovery
+6. **Held-Out Test Set**: True generalization measured on completely unseen data
+
+### How to Run Training
+
+**Install dependencies first:**
+```bash
+pip install -r requirements.txt
+```
+
+**Run fine-tuning:**
+```bash
+python3 scripts/train.py
+```
+
+**Output:**
+- Training checkpoints: `results/checkpoint-*/`
+- Final fine-tuned model: `results/final-model/`
+- Training logs printed to console
+
+**Expected training time**: ~5-10 minutes on CPU, ~1-2 minutes on GPU (for 48 samples, 3 epochs)
