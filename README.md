@@ -181,6 +181,11 @@ This script demonstrates:
 
 The fine-tuning pipeline (`scripts/train.py`) uses the **Hugging Face Transformers Trainer API** for clean, reproducible training.
 
+**Important**: The Trainer relies on Accelerate for distributed training support. Ensure all dependencies are installed:
+```bash
+pip install -r requirements.txt
+```
+
 **Training Process:**
 1. Load `google/flan-t5-small` base model and tokenizer
 2. Load train and validation datasets from `data/final/`
