@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fine-tuning script for incident triage model.
+Fine-tuning script for incident triage model using Config C (best configuration).
 Uses Hugging Face Transformers Trainer API for clean, reproducible training.
 """
 
@@ -67,22 +67,21 @@ def preprocess_function(examples, tokenizer, max_input_length=512, max_target_le
     return model_inputs
 
 
-def create_training_args(output_dir: str):
+def create_training_args(output_dir: str, learning_rate: float = 5e-5, batch_size: int = 2, epochs: int = 5):
     """
     Create Seq2SeqTrainingArguments compatible with different transformers versions.
-    Handles both 'eval_strategy' (newer) and 'evaluation_strategy' (older) parameter names.
+    Defaults to Config C (best configuration).
     """
-    # Build arguments dict with newer parameter names (eval_strategy)
     args_dict = {
         "output_dir": output_dir,
         "eval_strategy": "epoch",
         "save_strategy": "epoch",
         "logging_strategy": "steps",
         "logging_steps": 50,
-        "num_train_epochs": 3,
-        "per_device_train_batch_size": 4,
-        "per_device_eval_batch_size": 4,
-        "learning_rate": 5e-5,
+        "num_train_epochs": epochs,
+        "per_device_train_batch_size": batch_size,
+        "per_device_eval_batch_size": batch_size,
+        "learning_rate": learning_rate,
         "weight_decay": 0.01,
         "save_total_limit": 2,
         "load_best_model_at_end": True,
@@ -94,36 +93,35 @@ def create_training_args(output_dir: str):
         "push_to_hub": False
     }
     
-    # Try with newer parameter names first
     try:
         return Seq2SeqTrainingArguments(**args_dict)
     except TypeError as e:
-        error_msg = str(e)
-        
-        # Handle eval_strategy → evaluation_strategy
-        if "eval_strategy" in error_msg or "evaluation_strategy" in error_msg:
+        if "eval_strategy" in str(e) or "evaluation_strategy" in str(e):
             args_dict["evaluation_strategy"] = args_dict.pop("eval_strategy")
-            print("  Note: Using 'evaluation_strategy' (older transformers version)")
             return Seq2SeqTrainingArguments(**args_dict)
         else:
-            # Re-raise if it's a different error
             raise
 
 
 def main():
     """
-    Main training pipeline.
+    Main training pipeline using Config C (best configuration).
     """
     print("="*70)
-    print("INCIDENT TRIAGE MODEL - FINE-TUNING")
+    print("INCIDENT TRIAGE MODEL - FINE-TUNING (Config C)")
     print("="*70)
     
-    # Configuration
+    # Configuration - Config C (best from hyperparameter tuning)
     model_name = "google/flan-t5-small"
     train_file = "data/final/train.jsonl"
     val_file = "data/final/val.jsonl"
-    output_dir = "results"
-    final_model_dir = "results/final-model"
+    output_dir = "results/config_c_(higher_capacity)"
+    final_model_dir = "results/config_c_(higher_capacity)/final-model"
+    
+    # Config C hyperparameters
+    learning_rate = 5e-5
+    batch_size = 2
+    epochs = 5
     
     # Verify files exist
     if not Path(train_file).exists():
@@ -170,14 +168,14 @@ def main():
         padding=True
     )
     
-    # Training arguments (with version compatibility)
-    print(f"\nConfiguring training parameters...")
-    training_args = create_training_args(output_dir)
+    # Training arguments (Config C)
+    print(f"\nConfiguring training parameters (Config C - Best Configuration)...")
+    training_args = create_training_args(output_dir, learning_rate, batch_size, epochs)
     
     print(f"  Output directory: {output_dir}")
-    print(f"  Epochs: {training_args.num_train_epochs}")
-    print(f"  Batch size: {training_args.per_device_train_batch_size}")
-    print(f"  Learning rate: {training_args.learning_rate}")
+    print(f"  Learning rate: {learning_rate}")
+    print(f"  Batch size: {batch_size}")
+    print(f"  Epochs: {epochs}")
     print(f"  Seed: {training_args.seed}")
     
     # Initialize trainer
@@ -220,7 +218,7 @@ def main():
     Path(final_model_dir).mkdir(parents=True, exist_ok=True)
     trainer.save_model(final_model_dir)
     tokenizer.save_pretrained(final_model_dir)
-    print(f"✓ Model saved successfully")
+    print(f"✓ Model and tokenizer saved successfully")
     
     print(f"\n{'='*70}")
     print("✓ FINE-TUNING PIPELINE COMPLETE")
