@@ -1,0 +1,13 @@
+# Core dependencies for incident-triage-llm project
+
+# Hugging Face transformers for model loading and inference
+transformers>=4.30.0
+
+# Datasets library for efficient data handling
+datasets>=2.14.0
+
+# PyTorch for model training and inference
+torch>=2.0.0
+
+# Optional: Accelerate for distributed training and mixed precision
+accelerate>=0.20.0
