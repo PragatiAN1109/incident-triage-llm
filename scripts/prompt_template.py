@@ -32,7 +32,14 @@ JSON:
 Incident:
 {incident_text}
 
-Complete the JSON with valid values. Ensure all fields have proper quoted strings.
+STRICT REQUIREMENTS:
+- Return a SINGLE JSON object only. No extra text.
+- Use ONLY standard ASCII double quotes ("). Do NOT use smart quotes.
+- Do NOT use parentheses for values.
+- Do NOT stop early. Ensure recommended_action is present and non-empty.
+- severity must be exactly "SEV-1" or "SEV-3"
+- likely_cause must be exactly "Packet responder termination" OR "Block serving exception"
+
 Output ONLY the completed JSON:
 """
     return prompt
