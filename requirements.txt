@@ -9,12 +9,12 @@ tokenizers==0.15.2
 # Hugging Face Hub for model downloads
 huggingface-hub==0.36.2
 
+# Accelerate for distributed training and mixed precision
+# REQUIRED: Version 0.27.2 needed for transformers 4.38.2 Trainer compatibility
+accelerate==0.27.2
+
 # Datasets library for efficient data handling
 datasets>=2.16.0
 
 # PyTorch for model training and inference
 torch>=2.0.0
-
-# Accelerate for distributed training and mixed precision
-# REQUIRED: Version 0.27.0+ needed for transformers 4.38.2 Trainer compatibility
-accelerate>=0.27.0
