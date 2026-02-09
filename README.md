@@ -90,14 +90,14 @@ Labels are assigned deterministically using keyword-based heuristics:
 
 Each training example contains:
 - **prompt**: The `incident_text` field (service + log lines)
-- **response**: A JSON string with three fields:
-  ```json
-  {
-    "severity": "SEV-1",
-    "likely_cause": "Block serving exception",
-    "recommended_action": "Investigate DataNode block serving failures..."
-  }
-  ```
+- **response**: A JSON string with three fields (single-level encoding, NOT double-escaped)
+
+**Example JSONL line:**
+```json
+{"prompt":"service: hdfs-datanode\ninfo...","response":"{\"severity\":\"SEV-3\",\"likely_cause\":\"Packet responder termination\",\"recommended_action\":\"Monitor DataNode...\"}"}
+```
+
+**Response Validation**: The dataset builder automatically validates that response strings are parseable as JSON and contain all required fields (severity, likely_cause, recommended_action). This prevents encoding issues that could impair model training.
 
 ### Split Ratios and Reproducibility
 
@@ -179,7 +179,7 @@ This script demonstrates:
 
 ### Training Pipeline
 
-The fine-tuning pipeline (`scripts/train.py`) uses the **Hugging Face Transformers Trainer API** for clean, reproducible training.
+The fine-tuning pipeline (`scripts/train.py`) uses the **Hugging Face Transformers Trainer API** with Config C (best configuration from hyperparameter tuning).
 
 **Important**: The Trainer relies on Accelerate for distributed training support. Ensure all dependencies are installed:
 ```bash
@@ -190,9 +190,8 @@ pip install -r requirements.txt
 1. Load `google/flan-t5-small` base model and tokenizer
 2. Load train and validation datasets from `data/final/`
 3. Tokenize inputs (prompts) and targets (JSON responses)
-4. Configure training with optimized hyperparameters
-5. Train using Seq2SeqTrainer with automatic checkpointing
-6. Save best model based on validation loss
+4. Train using Config C hyperparameters (LR=5e-5, BS=2, Epochs=5)
+5. Save checkpoints and final model to `results/config_c_(higher_capacity)/final-model`
 
 ### Dataset Splits Used
 
@@ -202,12 +201,12 @@ pip install -r requirements.txt
 
 The test set is **not tokenized or used during training** - it remains completely unseen for final evaluation.
 
-### Hyperparameters
+### Hyperparameters (Config C - Best)
 
 **Core Training Settings:**
-- **Epochs**: 3
-- **Batch size**: 4 (train and eval)
 - **Learning rate**: 5e-5
+- **Batch size**: 2
+- **Epochs**: 5
 - **Weight decay**: 0.01
 - **Optimizer**: AdamW (default)
 
@@ -226,15 +225,6 @@ The test set is **not tokenized or used during training** - it remains completel
 - Fixed random seed: 42
 - Deterministic tokenization and data loading
 
-### Why This Setup is Reliable
-
-1. **Stratified Splitting**: Ensures balanced severity distribution across train/val/test
-2. **Fixed Seed**: All random operations use seed=42 for reproducibility
-3. **Validation-Based Selection**: Best model chosen by validation loss, not training loss
-4. **Standard Trainer API**: Uses well-tested Hugging Face infrastructure
-5. **Automatic Checkpointing**: Prevents loss of progress and enables recovery
-6. **Held-Out Test Set**: True generalization measured on completely unseen data
-
 ### How to Run Training
 
 **Install dependencies first:**
@@ -242,17 +232,17 @@ The test set is **not tokenized or used during training** - it remains completel
 pip install -r requirements.txt
 ```
 
-**Run fine-tuning:**
+**Run fine-tuning with Config C:**
 ```bash
 python3 scripts/train.py
 ```
 
 **Output:**
-- Training checkpoints: `results/checkpoint-*/`
-- Final fine-tuned model: `results/final-model/`
+- Training checkpoints: `results/config_c_(higher_capacity)/checkpoint-*/`
+- Final fine-tuned model: `results/config_c_(higher_capacity)/final-model/`
 - Training logs printed to console
 
-**Expected training time**: ~5-10 minutes on CPU, ~1-2 minutes on GPU (for 48 samples, 3 epochs)
+**Expected training time**: ~0.45 minutes (Config C parameters)
 
 ## Task 7: Hyperparameter Tuning & Model Selection
 
@@ -278,7 +268,7 @@ All experiments used a fixed random seed (42) for deterministic data splitting, 
 
 ## Task 8: Final Evaluation & Inference
 
-The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the latest checkpoint from the best-performing configuration (Config C) and applies decoding constraints to ensure stable, structured outputs.
+The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the best model and applies decoding constraints to ensure stable, structured outputs.
 
 ### What This Script Demonstrates
 
@@ -289,7 +279,10 @@ The script loads the best-performing model (Config C from Task 7) and runs infer
 - **Cause identification**: Identifying likely root causes from log signatures
 - **Action generation**: Producing actionable remediation recommendations
 
-**Automatic Checkpoint Loading**: The inference script automatically detects and loads the latest checkpoint under `results/config_c_(higher_capacity)` by finding the checkpoint with the highest step number (e.g., `checkpoint-85`).
+**Automatic Model Loading**: The inference script uses a priority-based loading strategy:
+1. First checks for `results/config_c_(higher_capacity)/final-model` (saved after training completes)
+2. Falls back to latest checkpoint by step number if final-model doesn't exist
+3. Displays which model/checkpoint is being loaded
 
 **Decoding Constraints**: To ensure stable structured outputs, the script uses:
 - Instruction wrapping to guide JSON generation
@@ -301,12 +294,17 @@ The script loads the best-performing model (Config C from Task 7) and runs infer
 
 ### How to Run
 
-**First, run the training experiments to generate models:**
+**First, rebuild the dataset (ensures correct response encoding):**
 ```bash
-python3 scripts/train_experiments.py
+python3 scripts/build_dataset.py
 ```
 
-**Then run inference on the best model:**
+**Then run training with Config C:**
+```bash
+python3 scripts/train.py
+```
+
+**Finally, run inference:**
 ```bash
 python3 scripts/inference.py
 ```
