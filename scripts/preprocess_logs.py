@@ -125,6 +125,7 @@ def group_into_incidents(
     """
     incidents = []
     buffer = []
+    incident_index = 0
     
     for raw_line, parsed in lines:
         buffer.append((raw_line, parsed))
@@ -143,8 +144,9 @@ def group_into_incidents(
             lines_text = "\n".join(incident_lines)
             incident_text = f"service: {service}\n{lines_text}"
             
-            # Create incident ID using sha1 hash of incident_text
-            hash_obj = hashlib.sha1(incident_text.encode('utf-8'))
+            # Create incident ID using sha1 hash of incident_text + index for uniqueness
+            hash_input = f"{incident_text}|{incident_index}"
+            hash_obj = hashlib.sha1(hash_input.encode('utf-8'))
             incident_id = hash_obj.hexdigest()[:12]
             
             # Calculate stats
@@ -163,6 +165,7 @@ def group_into_incidents(
             }
             
             incidents.append(incident)
+            incident_index += 1
             
             # Clear the buffer completely to avoid duplicates
             buffer = []
@@ -241,6 +244,8 @@ def process_logs(
     unique_ids = set(incident_ids)
     if len(unique_ids) != len(incident_ids):
         print(f"WARNING: Found {len(incident_ids) - len(unique_ids)} duplicate incident IDs!")
+    else:
+        print(f"✓ All {len(incidents)} incident IDs are unique")
     
     # Write output
     output_file = Path(output_path)
