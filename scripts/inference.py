@@ -75,7 +75,58 @@ def load_model(model_path: str):
     return tokenizer, model
 
 
-def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 256) -> str:
+def wrap_prompt_with_instruction(prompt: str) -> str:
+    """
+    Wrap the incident prompt with instruction context to guide generation.
+    
+    Args:
+        prompt: Raw incident text
+    
+    Returns:
+        Wrapped prompt with instructions
+    """
+    instruction = (
+        "You are an incident triage assistant. Return ONLY valid JSON with keys: "
+        "severity, likely_cause, recommended_action.\n\n"
+        f"INCIDENT:\n{prompt}\n\nJSON:"
+    )
+    return instruction
+
+
+def check_format(generated_text: str) -> str:
+    """
+    Check if generated text contains valid JSON format.
+    
+    Args:
+        generated_text: Model output
+    
+    Returns:
+        Format check status message
+    """
+    try:
+        # Try to parse as JSON
+        data = json.loads(generated_text)
+        
+        # Check required keys
+        required_keys = ["severity", "likely_cause", "recommended_action"]
+        has_all_keys = all(key in data for key in required_keys)
+        
+        # Check severity format (SEV-1, SEV-2, or SEV-3)
+        severity_valid = False
+        if "severity" in data:
+            severity_valid = re.match(r'^SEV-[123]$', str(data["severity"])) is not None
+        
+        if has_all_keys and severity_valid:
+            return "✓ FORMAT OK"
+        elif has_all_keys:
+            return "⚠ FORMAT WARNING: Invalid severity format"
+        else:
+            return "⚠ FORMAT WARNING: Missing required keys"
+    except:
+        return "⚠ FORMAT WARNING: Not valid JSON"
+
+
+def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 128) -> str:
     """
     Generate triage response for a given incident prompt.
     
@@ -88,14 +139,19 @@ def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 256) 
     Returns:
         Generated response text
     """
-    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+    # Wrap prompt with instruction
+    instructed_prompt = wrap_prompt_with_instruction(prompt)
+    
+    inputs = tokenizer(instructed_prompt, return_tensors="pt", max_length=512, truncation=True)
     
     outputs = model.generate(
         inputs.input_ids,
         max_new_tokens=max_new_tokens,
         num_beams=4,
         early_stopping=True,
-        do_sample=False  # Deterministic generation
+        do_sample=False,  # Deterministic generation
+        repetition_penalty=1.2,  # Penalize repetition
+        no_repeat_ngram_size=3  # Prevent repeating 3-grams
     )
     
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -184,6 +240,9 @@ def main():
         # Generate model output
         generated = generate_response(prompt, tokenizer, model)
         
+        # Check format
+        format_status = check_format(generated)
+        
         # Display results
         print(f"\n{'='*70}")
         print(f"TEST SAMPLE {i}")
@@ -201,6 +260,7 @@ def main():
         print(f"\nMODEL OUTPUT:")
         print(f"{'-'*70}")
         print(generated)
+        print(f"\n{format_status}")
         
         print(f"\nGROUND TRUTH:")
         print(f"{'-'*70}")
