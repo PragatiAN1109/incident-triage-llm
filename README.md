@@ -253,3 +253,82 @@ python3 scripts/train.py
 - Training logs printed to console
 
 **Expected training time**: ~5-10 minutes on CPU, ~1-2 minutes on GPU (for 48 samples, 3 epochs)
+
+## Hyperparameter Optimization
+
+### Experiment Configurations
+
+To identify optimal hyperparameters, we tested three distinct configurations on the same dataset with fixed random seed (42) for fair comparison:
+
+**Config A (Baseline)**
+- Learning rate: 5e-5
+- Batch size: 4
+- Epochs: 3
+- Strategy: Moderate learning rate with standard batch size for balanced convergence
+
+**Config B (Lower LR)**
+- Learning rate: 2e-5
+- Batch size: 4
+- Epochs: 3
+- Strategy: More conservative learning for stable, gradual optimization
+
+**Config C (Higher Capacity)**
+- Learning rate: 5e-5
+- Batch size: 2
+- Epochs: 5
+- Strategy: Smaller batches with more epochs for finer-grained updates and extended training
+
+### Results Comparison
+
+Run experiments with:
+```bash
+python3 scripts/train_experiments.py
+```
+
+**Experiment results** (example output format):
+```
+Config                     Train Loss    Val Loss     Runtime (min)
+----------------------------------------------------------------------
+Config A (Baseline)        0.1234        0.1567       3.45
+Config B (Lower LR)        0.1456        0.1489       3.52
+Config C (Higher Capacity) 0.0987        0.1423       5.78
+```
+
+*Note: Actual metrics will be printed by the experiment script and saved to `results/experiment_results.json`*
+
+### Selected Configuration
+
+**Best Configuration**: Determined automatically by lowest validation loss.
+
+The experiment runner:
+1. Trains all three configurations independently
+2. Compares validation loss across experiments
+3. Identifies the best-performing configuration
+4. Saves detailed results to `results/experiment_results.json`
+
+### Key Observations
+
+**Expected Findings:**
+- **Lower learning rate** (Config B) may provide more stable training but slower convergence
+- **Higher capacity** (Config C) with more epochs and smaller batches may achieve better final performance at the cost of longer training time
+- **Baseline** (Config A) provides a good balance between speed and performance
+
+**Tradeoffs:**
+- **Training Time vs Performance**: Config C takes ~1.7x longer but may achieve better validation loss
+- **Stability vs Speed**: Config B is more conservative, Config A converges faster
+- **Batch Size Impact**: Smaller batches (Config C) provide noisier but potentially more effective gradient updates
+
+### How to Run Experiments
+
+```bash
+# Run all three configurations
+python3 scripts/train_experiments.py
+
+# Results will be saved to:
+# - results/config_a_baseline/
+# - results/config_b_lower_lr/
+# - results/config_c_higher_capacity/
+# - results/experiment_results.json (comparison summary)
+```
+
+Each experiment uses the same train/val split and random seed to ensure fair comparison.
