@@ -2,6 +2,7 @@
 """
 Build fine-tuning dataset from preprocessed incidents.
 Applies rule-based labeling for severity, likely_cause, and recommended_action.
+Uses structured JSON completion prompts for stable generation on small datasets.
 """
 
 import argparse
@@ -10,6 +11,7 @@ import random
 from pathlib import Path
 from collections import Counter
 from typing import Dict, List, Tuple
+from prompt_template import format_incident_prompt
 
 
 def assign_severity(incident: Dict) -> str:
@@ -93,12 +95,15 @@ def assign_recommended_action(likely_cause: str) -> str:
 
 def label_incident(incident: Dict) -> Dict:
     """
-    Add labels to an incident.
-    Returns prompt and response as a JSON string (NOT double-encoded).
+    Add labels to an incident using structured JSON completion prompt.
+    Returns prompt (with template) and response as a JSON string.
     """
     severity = assign_severity(incident)
     likely_cause = assign_likely_cause(incident)
     recommended_action = assign_recommended_action(likely_cause)
+    
+    # Use structured prompt template for slot-filling approach
+    prompt = format_incident_prompt(incident["incident_text"])
     
     response_obj = {
         "severity": severity,
@@ -110,15 +115,15 @@ def label_incident(incident: Dict) -> Dict:
     response_str = json.dumps(response_obj)
     
     return {
-        "prompt": incident["incident_text"],
+        "prompt": prompt,
         "response": response_str  # This is a plain string containing JSON
     }
 
 
-def validate_response_format(labeled_incidents: List[Dict], num_samples: int = 3):
+def validate_response_format(labeled_incidents: List[Dict], num_samples: int = 5):
     """
-    Validate that response strings can be parsed as JSON.
-    Samples random examples to verify correct encoding.
+    Validate that response strings can be parsed as JSON and prompts contain template.
+    Samples random examples to verify correct encoding and formatting.
     """
     print(f"\nValidating response format (sampling {num_samples} examples)...")
     
@@ -129,6 +134,8 @@ def validate_response_format(labeled_incidents: List[Dict], num_samples: int = 3
     
     for idx in sample_indices:
         item = labeled_incidents[idx]
+        
+        # Validate response JSON
         try:
             # Try to parse the response string as JSON
             parsed = json.loads(item["response"])
@@ -142,12 +149,23 @@ def validate_response_format(labeled_incidents: List[Dict], num_samples: int = 3
                 print(f"    Response: {item['response']}")
                 return False
             
-            print(f"  ✓ Sample {idx}: Valid JSON with all required fields")
+            # Check severity format
+            if not parsed["severity"].startswith("SEV-"):
+                print(f"  ✗ Sample {idx}: Invalid severity format: {parsed['severity']}")
+                return False
             
         except json.JSONDecodeError as e:
             print(f"  ✗ Sample {idx}: JSON parse error: {e}")
             print(f"    Response: {item['response']}")
             return False
+        
+        # Validate prompt contains template
+        if '"severity": ""' not in item["prompt"]:
+            print(f"  ✗ Sample {idx}: Prompt missing JSON template")
+            print(f"    Prompt start: {item['prompt'][:100]}...")
+            return False
+        
+        print(f"  ✓ Sample {idx}: Valid JSON response and template prompt")
     
     print(f"✓ All samples validated successfully")
     return True
@@ -295,11 +313,11 @@ def main():
     
     print(f"Total incidents: {len(incidents)}")
     
-    # Apply labeling
-    print("\nApplying rule-based labels...")
+    # Apply labeling with structured prompts
+    print("\nApplying rule-based labels with structured JSON completion prompts...")
     labeled_incidents = [label_incident(inc) for inc in incidents]
     
-    # Validate response format
+    # Validate response format and prompt template
     if not validate_response_format(labeled_incidents):
         print("\nError: Response format validation failed!")
         return 1
@@ -362,6 +380,7 @@ def main():
     
     print(f"\n✓ Dataset build complete!")
     print(f"  Output directory: {args.output_dir}")
+    print(f"\nNote: Using structured JSON completion prompts for stable generation on small datasets.")
     
     return 0
 
