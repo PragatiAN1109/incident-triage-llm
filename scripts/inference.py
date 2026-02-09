@@ -2,8 +2,7 @@
 """
 Final evaluation and inference demonstration script.
 Loads the fine-tuned model and runs inference on held-out test samples.
-Uses structured JSON completion (slot filling) for stable outputs.
-Includes inference-time JSON repair with robust normalization.
+Uses structured JSON completion with robust normalization and repair.
 """
 
 import json
@@ -83,39 +82,40 @@ def load_model(model_path: str):
     return tokenizer, model
 
 
-def normalize_output(text: str) -> str:
+def normalize_output(raw: str) -> str:
     """
-    Normalize model output to fix common JSON formatting issues.
+    Normalize model output to fix common formatting issues.
     
     Args:
-        text: Raw model output
+        raw: Raw model output
     
     Returns:
-        Normalized text
+        Normalized output
     """
-    # Replace smart quotes with normal quotes
-    text = text.replace(""", '"').replace(""", '"')
-    text = text.replace("'", "'").replace("'", "'")
+    # Convert smart quotes to normal quotes
+    output = raw.replace(""", '"').replace(""", '"')
+    output = output.replace("'", "'").replace("'", "'")
     
-    # Replace backticks with quotes
-    text = text.replace("`", '"')
+    # Convert backticks to quotes
+    output = output.replace("`", '"')
     
-    # Fix parentheses around values that break JSON
-    # Pattern: : (some text) -> : "some text"
-    # This handles cases like "recommended_action": (Monitor...)
-    text = re.sub(r':\s*\(([^)]+)\)', r': "\1"', text)
+    # Fix recommended_action with parentheses: "recommended_action": (text) -> "recommended_action": "text"
+    output = re.sub(r'"recommended_action"\s*:\s*\(([^)]+)\)', r'"recommended_action": "\1"', output)
     
-    # Trim whitespace
-    text = text.strip()
+    # If output is missing outer braces but contains field names, wrap it
+    if '"severity"' in output and not output.strip().startswith('{'):
+        # Find the start of the first field
+        first_field = output.find('"severity"')
+        if first_field > 0:
+            output = output[first_field:]
+        
+        # Wrap in braces if not already wrapped
+        if not output.strip().startswith('{'):
+            output = '{' + output
+        if not output.strip().endswith('}'):
+            output = output + '}'
     
-    # Extract substring between first { and last }
-    first_brace = text.find('{')
-    last_brace = text.rfind('}')
-    
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        text = text[first_brace:last_brace + 1]
-    
-    return text
+    return output.strip()
 
 
 def get_default_action(likely_cause: str) -> str:
@@ -136,65 +136,54 @@ def get_default_action(likely_cause: str) -> str:
     return defaults.get(likely_cause, "Review incident logs and correlate with cluster metrics")
 
 
-def repair_json(raw_output: str, incident_text: str = "") -> dict:
+def repair_json(normalized_output: str) -> dict:
     """
-    Attempt to repair invalid JSON from model output using robust extraction.
-    Uses heuristic defaults instead of UNKNOWN when possible.
+    Extract field values from normalized output using robust patterns.
+    Never returns UNKNOWN when values can be recovered.
     
     Args:
-        raw_output: Raw model output text
-        incident_text: Original incident text for context-based hints
+        normalized_output: Normalized model output
     
     Returns:
-        Dictionary with repaired JSON structure
+        Dictionary with extracted/repaired values
     """
-    # Start with empty values
     repaired = {
         "severity": "",
         "likely_cause": "",
         "recommended_action": ""
     }
     
-    # Normalize output first
-    normalized = normalize_output(raw_output)
+    output_lower = normalized_output.lower()
     
-    # Try to extract field values with robust regex patterns
-    # Severity: allow optional quotes, match SEV-1 or SEV-3
-    severity_pattern = r'severity\s*"?\s*:\s*"?\s*(SEV-[13])'
-    severity_match = re.search(severity_pattern, normalized, re.IGNORECASE)
-    if severity_match:
-        repaired["severity"] = severity_match.group(1)
+    # Extract severity: SEV-1 or SEV-3
+    sev_match = re.search(r'SEV-(1|3)', normalized_output, re.IGNORECASE)
+    if sev_match:
+        repaired["severity"] = f"SEV-{sev_match.group(1)}"
     
-    # Likely cause: match known values
-    likely_cause_patterns = [
-        r'likely_cause\s*"?\s*:\s*"?\s*(Packet responder termination)',
-        r'likely_cause\s*"?\s*:\s*"?\s*(Block serving exception)'
-    ]
+    # Extract likely_cause by matching substrings
+    if "block serving" in output_lower:
+        repaired["likely_cause"] = "Block serving exception"
+    elif "packet responder" in output_lower:
+        repaired["likely_cause"] = "Packet responder termination"
     
-    for pattern in likely_cause_patterns:
-        match = re.search(pattern, normalized, re.IGNORECASE)
-        if match:
-            repaired["likely_cause"] = match.group(1)
-            break
-    
-    # If likely_cause still empty, use incident context
-    if not repaired["likely_cause"] and incident_text:
-        if "exception while serving" in incident_text.lower():
-            repaired["likely_cause"] = "Block serving exception"
-        elif "packetresponder" in incident_text.lower() and "terminating" in incident_text.lower():
-            repaired["likely_cause"] = "Packet responder termination"
-    
-    # Recommended action: capture text after key until end or closing brace/comma
-    action_pattern = r'recommended_action\s*"?\s*:\s*"?\s*([^",}]+)'
-    action_match = re.search(action_pattern, normalized, re.IGNORECASE)
+    # Extract recommended_action
+    # Try to find text after "recommended_action"
+    action_pattern = r'"recommended_action"\s*:\s*"([^"]+)"'
+    action_match = re.search(action_pattern, normalized_output)
     if action_match:
-        repaired["recommended_action"] = action_match.group(1).strip().strip('"').strip()
+        repaired["recommended_action"] = action_match.group(1).strip()
+    else:
+        # Try without quotes
+        action_pattern2 = r'recommended_action["\']?\s*:\s*([^,}\n]+)'
+        action_match2 = re.search(action_pattern2, normalized_output, re.IGNORECASE)
+        if action_match2:
+            repaired["recommended_action"] = action_match2.group(1).strip().strip('"').strip("'").strip()
     
     # If recommended_action still empty and we have likely_cause, use default
     if not repaired["recommended_action"] and repaired["likely_cause"]:
         repaired["recommended_action"] = get_default_action(repaired["likely_cause"])
     
-    # Only use UNKNOWN as last resort if nothing was recovered
+    # Only use UNKNOWN if nothing was recovered
     if not repaired["severity"]:
         repaired["severity"] = "UNKNOWN (model output incomplete)"
     if not repaired["likely_cause"]:
@@ -205,13 +194,12 @@ def repair_json(raw_output: str, incident_text: str = "") -> dict:
     return repaired
 
 
-def parse_and_repair_json(raw_output: str, incident_text: str = "") -> tuple[dict, bool]:
+def parse_and_repair_json(raw_output: str) -> tuple[dict, bool]:
     """
     Parse model output as JSON, applying normalization and repair if needed.
     
     Args:
         raw_output: Raw model output text
-        incident_text: Original incident text for context
     
     Returns:
         Tuple of (parsed_dict, was_repaired)
@@ -227,16 +215,22 @@ def parse_and_repair_json(raw_output: str, incident_text: str = "") -> tuple[dic
         required_keys = ["severity", "likely_cause", "recommended_action"]
         if all(key in parsed for key in required_keys):
             # Check that values are not empty
-            if all(parsed[key] and str(parsed[key]).strip() for key in required_keys):
+            all_valid = all(
+                parsed[key] and 
+                str(parsed[key]).strip() and 
+                "UNKNOWN" not in str(parsed[key])
+                for key in required_keys
+            )
+            if all_valid:
                 return parsed, False  # Valid JSON, no repair needed
         
-        # Keys exist but some values are empty - repair
-        repaired = repair_json(raw_output, incident_text)
+        # Keys exist but some values are empty or UNKNOWN - repair
+        repaired = repair_json(normalized)
         return repaired, True
     
     except json.JSONDecodeError:
         # Step 3: Apply repair with robust extraction
-        repaired = repair_json(raw_output, incident_text)
+        repaired = repair_json(normalized)
         return repaired, True
 
 
@@ -258,36 +252,32 @@ def check_format(parsed_json: dict, was_repaired: bool) -> str:
     if not has_all_keys:
         return "⚠ FORMAT WARNING: Missing required keys"
     
-    # Check if any value contains UNKNOWN
-    has_unknown = any("UNKNOWN" in str(parsed_json.get(key, "")) for key in required_keys)
+    # Check if any value contains UNKNOWN or is empty
+    has_unknown = any(
+        "UNKNOWN" in str(parsed_json.get(key, "")) or 
+        not str(parsed_json.get(key, "")).strip()
+        for key in required_keys
+    )
     if has_unknown:
         return "⚠ FORMAT WARNING: Incomplete fields"
     
-    # Check that all values are non-empty
-    all_non_empty = all(parsed_json.get(key) and str(parsed_json.get(key)).strip() for key in required_keys)
-    if not all_non_empty:
-        return "⚠ FORMAT WARNING: Empty fields"
-    
     # Check severity format (SEV-1 or SEV-3)
     severity = str(parsed_json.get("severity", ""))
-    severity_valid = re.match(r'^SEV-[13]$', severity) is not None
+    severity_valid = re.match(r'^SEV-(1|3)$', severity) is not None
     
-    # Determine status
-    if was_repaired:
-        if severity_valid and all_non_empty:
-            return "✓ FORMAT OK (auto-repaired)"
-        else:
-            return "⚠ FORMAT WARNING: Invalid format after repair"
-    elif severity_valid and all_non_empty:
-        return "✓ FORMAT OK"
-    else:
+    if not severity_valid:
         return "⚠ FORMAT WARNING: Invalid severity format"
+    
+    # All checks passed
+    if was_repaired:
+        return "✓ FORMAT OK (auto-repaired)"
+    else:
+        return "✓ FORMAT OK"
 
 
 def generate_response(incident_text: str, tokenizer, model) -> str:
     """
     Generate triage response for a given incident text using structured completion.
-    Uses improved decoding parameters for complete JSON generation.
     
     Args:
         incident_text: Raw incident text
@@ -304,13 +294,15 @@ def generate_response(incident_text: str, tokenizer, model) -> str:
     
     outputs = model.generate(
         inputs.input_ids,
-        max_new_tokens=256,        # Increased from 128
-        min_new_tokens=60,         # Ensure minimum completion
+        eos_token_id=tokenizer.eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+        max_new_tokens=256,
+        min_new_tokens=60,
         num_beams=4,
         do_sample=False,
         repetition_penalty=1.2,
         no_repeat_ngram_size=3,
-        length_penalty=0.8,        # Encourage finishing
+        length_penalty=0.8,
         early_stopping=True
     )
     
@@ -338,7 +330,6 @@ def load_test_data(test_file: str):
 def select_diverse_samples(test_data: list, num_samples: int = 3) -> list:
     """
     Select diverse test samples ensuring variety in incident types.
-    Ensures at least one Packet responder termination and one Block serving exception.
     
     Args:
         test_data: List of test examples
@@ -353,13 +344,6 @@ def select_diverse_samples(test_data: list, num_samples: int = 3) -> list:
     other_samples = []
     
     for item in test_data:
-        # Extract incident text from prompt (after "Incident:\n")
-        prompt_text = item.get("prompt", "")
-        if "Incident:\n" in prompt_text:
-            incident_text = prompt_text.split("Incident:\n", 1)[1].lower()
-        else:
-            incident_text = ""
-        
         response_data = json.loads(item["response"])
         likely_cause = response_data.get("likely_cause", "")
         
@@ -464,8 +448,8 @@ def main():
         if "Incident:\n" in prompt_text:
             incident_text = prompt_text.split("Incident:\n", 1)[1]
             # Extract just the incident text before the final instruction
-            if "\n\nComplete the JSON" in incident_text:
-                incident_text = incident_text.split("\n\nComplete the JSON")[0]
+            if "\n\nSTRICT REQUIREMENTS:" in incident_text:
+                incident_text = incident_text.split("\n\nSTRICT REQUIREMENTS:")[0]
         else:
             incident_text = prompt_text
         
@@ -475,7 +459,7 @@ def main():
         raw_output = generate_response(incident_text, tokenizer, model)
         
         # Parse and repair JSON
-        parsed_json, was_repaired = parse_and_repair_json(raw_output, incident_text)
+        parsed_json, was_repaired = parse_and_repair_json(raw_output)
         
         if was_repaired:
             repair_count += 1
