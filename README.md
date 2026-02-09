@@ -35,7 +35,7 @@ python3 scripts/preprocess_logs.py \
 
 ### Committed Sample
 
-A sample of 50 processed incidents is available at:
+A sample of 48 processed incidents is available at:
 ```
 data/processed/sample_incidents_50.jsonl
 ```
@@ -68,16 +68,16 @@ The dataset builder (`scripts/build_dataset.py`) transforms preprocessed inciden
 Labels are assigned deterministically using keyword-based heuristics:
 
 **Severity** (3 levels):
-- **SEV-1 (Critical)**: 6+ WARN logs, any ERROR logs, or critical keywords ("exception", "error", "fatal", "failed")
-- **SEV-2 (High)**: 3-5 WARN logs
-- **SEV-3 (Low)**: 0-2 WARN logs (mostly INFO)
+- **SEV-1 (Critical)**: Any ERROR/FATAL level OR critical keywords ("exception", "fatal", "error", "failed") OR phrase "exception while serving" OR WARN count ≥ 4
+- **SEV-2 (High)**: WARN count 2-3
+- **SEV-3 (Low)**: WARN count 0-1
 
-**Likely Cause** (5 categories):
-- **Block serving exception**: Logs containing "exception while serving"
-- **Packet responder termination**: Logs with "packetresponder" + "terminating"
-- **Network connectivity issue**: Logs with "timeout" or "refused"
-- **Service degradation**: Logs with "slow" or "lag"
-- **HDFS operational event**: Default category
+**Likely Cause** (5 categories, strict priority order):
+1. **Block serving exception**: Contains "exception while serving"
+2. **Network connectivity issue**: Contains "timeout", "refused", "unreachable", or "disconnect"
+3. **Service degradation**: Contains "slow", "lag", "backlog", or "thrott"
+4. **Packet responder termination**: Contains both "packetresponder" AND "terminating"
+5. **HDFS operational event**: Default category (no matches above)
 
 **Recommended Action**: Mapped deterministically from the likely cause:
 - Block serving exception → "Investigate DataNode block serving failures and check network connectivity between nodes"
@@ -102,9 +102,26 @@ Each training example contains:
 ### Split Ratios and Reproducibility
 
 The dataset is split with **stratification by severity** to ensure balanced representation:
-- **Train**: 70% (33 samples)
-- **Validation**: 15% (6 samples)
-- **Test**: 15% (9 samples)
+- **Train**: 70%
+- **Validation**: 15%
+- **Test**: 15%
+
+**Actual Counts**: The script prints exact counts when run. For the sample dataset (`sample_incidents_50.jsonl` with 48 complete incidents), the distribution is:
+```
+Total samples: 48
+
+Train: 33 samples
+  SEV-1: 10
+  SEV-3: 23
+
+Validation: 6 samples
+  SEV-1: 2
+  SEV-3: 4
+
+Test: 9 samples
+  SEV-1: 3
+  SEV-3: 6
+```
 
 **Reproducibility**: All splits use a fixed random seed (default: 42) for deterministic results across runs.
 
