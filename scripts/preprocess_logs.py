@@ -116,65 +116,74 @@ def group_into_incidents(
     lines: List[Tuple[str, Dict[str, str]]],
     group_size: int,
     seed: int,
-    max_incidents: Optional[int] = None
+    max_incidents: Optional[int] = None,
+    stride: int = 1
 ) -> List[Dict]:
     """
-    Group log lines into incidents using a rolling buffer.
-    Each incident contains group_size consecutive informative lines.
-    Buffer is cleared after each incident to prevent duplicates.
+    Group log lines into incidents using a sliding window approach.
+    
+    Args:
+        lines: List of (normalized_line, parsed_data) tuples
+        group_size: Number of lines per incident
+        seed: Random seed (for consistency)
+        max_incidents: Maximum number of incidents to generate
+        stride: How many lines to slide the window (1 = maximum overlap, group_size = no overlap)
+    
+    Returns:
+        List of incident dictionaries
     """
     incidents = []
-    buffer = []
-    incident_index = 0
     
-    for raw_line, parsed in lines:
-        buffer.append((raw_line, parsed))
+    # Use sliding window with specified stride
+    for start_idx in range(0, len(lines) - group_size + 1, stride):
+        # Extract window
+        window = lines[start_idx:start_idx + group_size]
+        incident_lines = [line for line, _ in window]
+        parsed_lines = [p for _, p in window]
         
-        if len(buffer) >= group_size:
-            # Create incident from buffer
-            incident_lines = [line for line, _ in buffer[:group_size]]
-            parsed_lines = [p for _, p in buffer[:group_size]]
-            
-            # Infer service from most common component
-            components = [p["component"] for p in parsed_lines]
-            most_common_component = Counter(components).most_common(1)[0][0]
-            service = infer_service(most_common_component)
-            
-            # Create incident_text with service prefix
-            lines_text = "\n".join(incident_lines)
-            incident_text = f"service: {service}\n{lines_text}"
-            
-            # Create incident ID using sha1 hash of incident_text + index for uniqueness
-            hash_input = f"{incident_text}|{incident_index}"
-            hash_obj = hashlib.sha1(hash_input.encode('utf-8'))
-            incident_id = hash_obj.hexdigest()[:12]
-            
-            # Calculate stats
-            levels_count = dict(Counter(p["level"] for p in parsed_lines))
-            top_components = dict(Counter(components).most_common(3))
-            
-            incident = {
-                "incident_id": incident_id,
-                "service": service,
-                "lines": incident_lines,
-                "incident_text": incident_text,
-                "stats": {
-                    "levels_count": levels_count,
-                    "top_components": top_components
-                }
+        # Infer service from most common component
+        components = [p["component"] for p in parsed_lines]
+        most_common_component = Counter(components).most_common(1)[0][0]
+        service = infer_service(most_common_component)
+        
+        # Create incident_text with service prefix
+        lines_text = "\n".join(incident_lines)
+        incident_text = f"service: {service}\n{lines_text}"
+        
+        # Create incident ID using sha1 hash of incident_text
+        hash_obj = hashlib.sha1(incident_text.encode('utf-8'))
+        incident_id = hash_obj.hexdigest()[:12]
+        
+        # Calculate stats
+        levels_count = dict(Counter(p["level"] for p in parsed_lines))
+        top_components = dict(Counter(components).most_common(3))
+        
+        incident = {
+            "incident_id": incident_id,
+            "service": service,
+            "lines": incident_lines,
+            "incident_text": incident_text,
+            "stats": {
+                "levels_count": levels_count,
+                "top_components": top_components
             }
-            
-            incidents.append(incident)
-            incident_index += 1
-            
-            # Clear the buffer completely to avoid duplicates
-            buffer = []
-            
-            # Check if we've reached max incidents
-            if max_incidents and len(incidents) >= max_incidents:
-                break
+        }
+        
+        incidents.append(incident)
+        
+        # Check if we've reached max incidents
+        if max_incidents and len(incidents) >= max_incidents:
+            break
     
-    return incidents
+    # Deduplicate by incident_id (in case of identical windows)
+    seen_ids = set()
+    unique_incidents = []
+    for incident in incidents:
+        if incident["incident_id"] not in seen_ids:
+            seen_ids.add(incident["incident_id"])
+            unique_incidents.append(incident)
+    
+    return unique_incidents
 
 
 def process_logs(
@@ -183,10 +192,14 @@ def process_logs(
     group_size: int = 8,
     seed: int = 42,
     max_incidents: Optional[int] = None,
+    stride: int = 4,
     dry_run: bool = False
 ) -> Dict:
     """
     Main processing function.
+    
+    Args:
+        stride: Window stride (default 4 = 50% overlap for group_size=8)
     """
     input_file = Path(input_path)
     
@@ -214,6 +227,10 @@ def process_logs(
     print(f"Total lines read: {total_lines}")
     print(f"Informative lines: {len(informative_lines)}")
     
+    # Calculate expected incidents
+    max_possible = (len(informative_lines) - group_size) // stride + 1
+    expected = min(max_possible, max_incidents) if max_incidents else max_possible
+    
     # Dry run - show samples and summary
     if dry_run:
         print("\n=== DRY RUN MODE ===")
@@ -223,8 +240,9 @@ def process_logs(
             print(f"    Normalized: {norm_line}")
         
         print(f"\n=== Summary ===")
-        print(f"Would generate approximately {len(informative_lines) // group_size} incidents")
+        print(f"Would generate approximately {expected} incidents")
         print(f"Group size: {group_size}")
+        print(f"Stride: {stride} (window overlap)")
         if max_incidents:
             print(f"Max incidents limit: {max_incidents}")
         
@@ -236,16 +254,16 @@ def process_logs(
         }
     
     # Group into incidents
-    print(f"\nGrouping into incidents (group_size={group_size})...")
-    incidents = group_into_incidents(informative_lines, group_size, seed, max_incidents)
+    print(f"\nGrouping into incidents (group_size={group_size}, stride={stride})...")
+    incidents = group_into_incidents(informative_lines, group_size, seed, max_incidents, stride)
     
     # Verify uniqueness
     incident_ids = [inc["incident_id"] for inc in incidents]
     unique_ids = set(incident_ids)
     if len(unique_ids) != len(incident_ids):
-        print(f"WARNING: Found {len(incident_ids) - len(unique_ids)} duplicate incident IDs!")
-    else:
-        print(f"✓ All {len(incidents)} incident IDs are unique")
+        print(f"Note: Deduplication removed {len(incident_ids) - len(unique_ids)} duplicate incidents")
+    
+    print(f"✓ Generated {len(incidents)} unique incidents")
     
     # Write output
     output_file = Path(output_path)
@@ -292,6 +310,12 @@ def main():
         help="Number of log lines per incident group"
     )
     parser.add_argument(
+        "--stride",
+        type=int,
+        default=4,
+        help="Window stride (default 4 = 50%% overlap for group_size=8)"
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -300,8 +324,8 @@ def main():
     parser.add_argument(
         "--max_incidents",
         type=int,
-        default=500,
-        help="Maximum number of incidents to generate"
+        default=None,
+        help="Maximum number of incidents to generate (default: no limit)"
     )
     parser.add_argument(
         "--dry_run",
@@ -318,6 +342,7 @@ def main():
             group_size=args.group_size,
             seed=args.seed,
             max_incidents=args.max_incidents,
+            stride=args.stride,
             dry_run=args.dry_run
         )
     except Exception as e:
