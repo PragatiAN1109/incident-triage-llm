@@ -2,16 +2,57 @@
 """
 Final evaluation and inference demonstration script.
 Loads the fine-tuned model and runs inference on held-out test samples.
+Automatically detects and loads the latest checkpoint if needed.
 """
 
 import json
+import argparse
+import re
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+
+def find_latest_checkpoint(base_path: Path) -> Path:
+    """
+    Find the latest checkpoint in a directory by step number.
+    
+    Args:
+        base_path: Base directory to search for checkpoints
+    
+    Returns:
+        Path to the latest checkpoint, or base_path if no checkpoints found
+    """
+    # Check if base_path has config.json (is a valid model)
+    if (base_path / "config.json").exists():
+        return base_path
+    
+    # Look for checkpoint subdirectories
+    checkpoint_pattern = re.compile(r'checkpoint-(\d+)')
+    checkpoints = []
+    
+    for item in base_path.iterdir():
+        if item.is_dir():
+            match = checkpoint_pattern.match(item.name)
+            if match:
+                step_num = int(match.group(1))
+                checkpoints.append((step_num, item))
+    
+    if checkpoints:
+        # Sort by step number and get the latest
+        checkpoints.sort(key=lambda x: x[0], reverse=True)
+        latest_step, latest_path = checkpoints[0]
+        print(f"No config.json found at {base_path}")
+        print(f"Loading latest checkpoint: {latest_path.name}")
+        return latest_path
+    
+    # No checkpoints found, return original path
+    return base_path
 
 
 def load_model(model_path: str):
     """
     Load fine-tuned model and tokenizer.
+    Automatically detects and loads latest checkpoint if base path is not a valid model.
     
     Args:
         model_path: Path to the fine-tuned model directory
@@ -19,9 +60,17 @@ def load_model(model_path: str):
     Returns:
         Tuple of (tokenizer, model)
     """
-    print(f"Loading fine-tuned model from: {model_path}")
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_path)
+    base_path = Path(model_path)
+    
+    if not base_path.exists():
+        raise FileNotFoundError(f"Model path not found: {model_path}")
+    
+    # Find the actual model path (may be a checkpoint subdirectory)
+    resolved_path = find_latest_checkpoint(base_path)
+    
+    print(f"\nLoading fine-tuned model from: {resolved_path}")
+    tokenizer = AutoTokenizer.from_pretrained(str(resolved_path))
+    model = AutoModelForSeq2SeqLM.from_pretrained(str(resolved_path))
     print(f"✓ Model loaded successfully")
     return tokenizer, model
 
@@ -74,28 +123,49 @@ def main():
     """
     Run inference on test set and display results.
     """
+    parser = argparse.ArgumentParser(
+        description="Run inference on test data using fine-tuned model"
+    )
+    parser.add_argument(
+        "--model_path",
+        default="results/config_c_(higher_capacity)",
+        help="Path to fine-tuned model or experiment directory"
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=3,
+        help="Number of test samples to display"
+    )
+    
+    args = parser.parse_args()
+    
     print("="*70)
     print("FINAL EVALUATION & INFERENCE DEMO")
     print("="*70)
     
     # Configuration
-    model_path = "results/config_c_(higher_capacity)"
+    model_path = args.model_path
     test_file = "data/final/test.jsonl"
-    num_samples = 3  # Number of samples to display
+    num_samples = args.num_samples
     
     # Verify paths exist
     if not Path(model_path).exists():
-        print(f"\nError: Model not found at {model_path}")
+        print(f"\nError: Model path not found: {model_path}")
         print("Please run training experiments first: python3 scripts/train_experiments.py")
         return 1
     
     if not Path(test_file).exists():
-        print(f"\nError: Test file not found at {test_file}")
+        print(f"\nError: Test file not found: {test_file}")
         print("Please run build_dataset.py first to generate test data")
         return 1
     
-    # Load model
-    tokenizer, model = load_model(model_path)
+    # Load model (with automatic checkpoint detection)
+    try:
+        tokenizer, model = load_model(model_path)
+    except Exception as e:
+        print(f"\nError loading model: {e}")
+        return 1
     
     # Load test data
     print(f"\nLoading test data from: {test_file}")
