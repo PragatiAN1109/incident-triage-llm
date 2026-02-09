@@ -2,7 +2,7 @@
 """
 Final evaluation and inference demonstration script.
 Loads the fine-tuned model and runs inference on held-out test samples.
-Automatically detects and loads the latest checkpoint if needed.
+Uses structured JSON completion (slot filling) for stable outputs.
 """
 
 import json
@@ -81,22 +81,29 @@ def load_model(model_path: str):
     return tokenizer, model
 
 
-def wrap_prompt_with_instruction(prompt: str) -> str:
+def wrap_prompt_for_completion(incident_text: str) -> str:
     """
-    Wrap the incident prompt with instruction context to guide generation.
+    Wrap the incident prompt as a structured JSON completion task.
+    Provides template with empty slots to guide slot-filling behavior.
     
     Args:
-        prompt: Raw incident text
+        incident_text: Raw incident text
     
     Returns:
-        Wrapped prompt with instructions
+        Structured completion prompt
     """
-    instruction = (
-        "You are an incident triage assistant. Return ONLY valid JSON with keys: "
-        "severity, likely_cause, recommended_action.\n\n"
-        f"INCIDENT:\n{prompt}\n\nJSON:"
-    )
-    return instruction
+    prompt = f"""You are an incident triage assistant.
+Fill in the JSON template below using the incident information.
+JSON:
+{{
+  "severity": "",
+  "likely_cause": "",
+  "recommended_action": ""
+}}
+Incident:
+{incident_text}
+"""
+    return prompt
 
 
 def check_format(generated_text: str) -> str:
@@ -134,7 +141,7 @@ def check_format(generated_text: str) -> str:
 
 def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 128) -> str:
     """
-    Generate triage response for a given incident prompt.
+    Generate triage response for a given incident prompt using structured completion.
     
     Args:
         prompt: Input incident text
@@ -145,10 +152,10 @@ def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 128) 
     Returns:
         Generated response text
     """
-    # Wrap prompt with instruction
-    instructed_prompt = wrap_prompt_with_instruction(prompt)
+    # Wrap prompt for structured completion
+    completion_prompt = wrap_prompt_for_completion(prompt)
     
-    inputs = tokenizer(instructed_prompt, return_tensors="pt", max_length=512, truncation=True)
+    inputs = tokenizer(completion_prompt, return_tensors="pt", max_length=512, truncation=True)
     
     outputs = model.generate(
         inputs.input_ids,
