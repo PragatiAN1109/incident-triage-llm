@@ -275,3 +275,29 @@ Config C was chosen as the optimal configuration due to achieving the **lowest v
 ### Reproducibility Note
 
 All experiments used a fixed random seed (42) for deterministic data splitting, tokenization, and model initialization. Given the relatively small dataset size (33 training samples), individual run results may exhibit minor variance due to numerical precision and hardware differences. However, the performance trends across configurations remain consistent, with Config C consistently outperforming the alternatives in validation loss.
+
+## Task 8: Final Evaluation & Inference
+
+The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data.
+
+### What This Script Demonstrates
+
+The script loads the best-performing model (Config C from Task 7) and runs inference on held-out test samples to provide a qualitative evaluation of the model's capabilities:
+
+- **Incident parsing**: Understanding normalized HDFS log patterns
+- **Severity classification**: Categorizing incidents as SEV-1, SEV-2, or SEV-3
+- **Cause identification**: Identifying likely root causes from log signatures
+- **Action generation**: Producing actionable remediation recommendations
+
+### How to Run
+
+```bash
+python3 scripts/inference.py
+```
+
+**Output**: The script displays 3 test samples with:
+- Input incident logs (truncated for readability)
+- Model-generated triage response
+- Ground-truth reference response
+
+This provides a side-by-side comparison to assess the model's learned behavior on unseen data.
