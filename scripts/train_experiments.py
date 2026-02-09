@@ -2,10 +2,12 @@
 """
 Hyperparameter optimization experiment runner.
 Trains multiple configurations and compares validation performance.
+Supports --only_best flag to run only Config C (best configuration).
 """
 
 import json
 import time
+import argparse
 from pathlib import Path
 from datasets import Dataset
 from transformers import (
@@ -88,10 +90,14 @@ def run_experiment(
     epochs: int,
     train_dataset,
     val_dataset,
-    tokenizer
+    tokenizer,
+    save_final_model: bool = True
 ):
     """
     Run a single training experiment with given hyperparameters.
+    
+    Args:
+        save_final_model: If True, saves model+tokenizer to final-model subdirectory after training
     """
     print(f"\n{'='*70}")
     print(f"EXPERIMENT: {config_name}")
@@ -135,6 +141,22 @@ def run_experiment(
     # Evaluate
     eval_metrics = trainer.evaluate()
     
+    # Save final model if requested (for best config)
+    if save_final_model:
+        final_model_dir = Path(output_dir) / "final-model"
+        final_model_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"\nSaving final model to: {final_model_dir}")
+        model.save_pretrained(str(final_model_dir))
+        tokenizer.save_pretrained(str(final_model_dir))
+        
+        # Verify config.json exists
+        config_path = final_model_dir / "config.json"
+        if config_path.exists():
+            print(f"✓ Verified config.json exists at: {config_path}")
+        else:
+            print(f"⚠ Warning: config.json not found at: {config_path}")
+    
     # Collect results
     results = {
         "config_name": config_name,
@@ -154,6 +176,8 @@ def run_experiment(
     print(f"  Validation loss: {results['val_loss']:.4f}")
     print(f"  Runtime: {results['runtime_seconds']:.2f}s ({results['runtime_seconds']/60:.2f} min)")
     print(f"  Model saved to: {output_dir}")
+    if save_final_model:
+        print(f"  Final model saved to: {output_dir}/final-model")
     
     return results
 
@@ -162,8 +186,22 @@ def main():
     """
     Run hyperparameter optimization experiments.
     """
+    parser = argparse.ArgumentParser(
+        description="Run hyperparameter optimization experiments"
+    )
+    parser.add_argument(
+        "--only_best",
+        action="store_true",
+        help="Run only Config C (best configuration) instead of all experiments"
+    )
+    
+    args = parser.parse_args()
+    
     print("="*70)
-    print("HYPERPARAMETER OPTIMIZATION EXPERIMENTS")
+    if args.only_best:
+        print("TRAINING BEST CONFIGURATION (Config C)")
+    else:
+        print("HYPERPARAMETER OPTIMIZATION EXPERIMENTS")
     print("="*70)
     
     # Load tokenizer (shared across all experiments)
@@ -212,9 +250,20 @@ def main():
         }
     ]
     
+    # Filter to only best config if requested
+    if args.only_best:
+        configs = [c for c in configs if c["name"] == "Config C (Higher Capacity)"]
+        print(f"\n✓ Running only best configuration: Config C")
+        print(f"  Learning rate: {configs[0]['learning_rate']}")
+        print(f"  Batch size: {configs[0]['batch_size']}")
+        print(f"  Epochs: {configs[0]['epochs']}")
+    
     # Run experiments
     all_results = []
     for config in configs:
+        # Save final model only for Config C
+        save_final = (config["name"] == "Config C (Higher Capacity)")
+        
         result = run_experiment(
             config["name"],
             config["learning_rate"],
@@ -222,40 +271,55 @@ def main():
             config["epochs"],
             tokenized_train,
             tokenized_val,
-            tokenizer
+            tokenizer,
+            save_final_model=save_final
         )
         all_results.append(result)
     
-    # Summary comparison
-    print(f"\n{'='*70}")
-    print("EXPERIMENT COMPARISON")
-    print(f"{'='*70}")
-    print(f"\n{'Config':<25} {'Train Loss':<12} {'Val Loss':<12} {'Runtime (min)':<15}")
-    print(f"{'-'*70}")
-    
-    for r in all_results:
-        print(f"{r['config_name']:<25} {r['train_loss']:<12.4f} {r['val_loss']:<12.4f} {r['runtime_seconds']/60:<15.2f}")
-    
-    # Identify best configuration
-    best_config = min(all_results, key=lambda x: x['val_loss'])
-    print(f"\n{'='*70}")
-    print(f"BEST CONFIGURATION: {best_config['config_name']}")
-    print(f"{'='*70}")
-    print(f"  Validation loss: {best_config['val_loss']:.4f}")
-    print(f"  Training loss: {best_config['train_loss']:.4f}")
-    print(f"  Runtime: {best_config['runtime_seconds']/60:.2f} minutes")
-    print(f"  Model saved to: {best_config['output_dir']}")
+    # Summary comparison (only if running multiple configs)
+    if not args.only_best and len(all_results) > 1:
+        print(f"\n{'='*70}")
+        print("EXPERIMENT COMPARISON")
+        print(f"{'='*70}")
+        print(f"\n{'Config':<25} {'Train Loss':<12} {'Val Loss':<12} {'Runtime (min)':<15}")
+        print(f"{'-'*70}")
+        
+        for r in all_results:
+            print(f"{r['config_name']:<25} {r['train_loss']:<12.4f} {r['val_loss']:<12.4f} {r['runtime_seconds']/60:<15.2f}")
+        
+        # Identify best configuration
+        best_config = min(all_results, key=lambda x: x['val_loss'])
+        print(f"\n{'='*70}")
+        print(f"BEST CONFIGURATION: {best_config['config_name']}")
+        print(f"{'='*70}")
+        print(f"  Validation loss: {best_config['val_loss']:.4f}")
+        print(f"  Training loss: {best_config['train_loss']:.4f}")
+        print(f"  Runtime: {best_config['runtime_seconds']/60:.2f} minutes")
+        print(f"  Model saved to: {best_config['output_dir']}")
     
     # Save results to JSON
     results_file = "results/experiment_results.json"
     Path("results").mkdir(exist_ok=True)
-    with open(results_file, 'w') as f:
-        json.dump({
-            "experiments": all_results,
-            "best_config": best_config['config_name'],
-            "best_val_loss": best_config['val_loss']
-        }, f, indent=2)
-    print(f"\n✓ Results saved to: {results_file}")
+    
+    if args.only_best:
+        # For --only_best, just save the single result
+        with open(results_file, 'w') as f:
+            json.dump({
+                "mode": "best_only",
+                "experiment": all_results[0],
+                "config": "Config C (Higher Capacity)"
+            }, f, indent=2)
+        print(f"\n✓ Results saved to: {results_file}")
+    else:
+        # For full experiments, save comparison
+        best_config = min(all_results, key=lambda x: x['val_loss'])
+        with open(results_file, 'w') as f:
+            json.dump({
+                "experiments": all_results,
+                "best_config": best_config['config_name'],
+                "best_val_loss": best_config['val_loss']
+            }, f, indent=2)
+        print(f"\n✓ Results saved to: {results_file}")
     
     return 0
 
