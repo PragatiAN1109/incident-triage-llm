@@ -94,21 +94,63 @@ def assign_recommended_action(likely_cause: str) -> str:
 def label_incident(incident: Dict) -> Dict:
     """
     Add labels to an incident.
+    Returns prompt and response as a JSON string (NOT double-encoded).
     """
     severity = assign_severity(incident)
     likely_cause = assign_likely_cause(incident)
     recommended_action = assign_recommended_action(likely_cause)
     
-    response = {
+    response_obj = {
         "severity": severity,
         "likely_cause": likely_cause,
         "recommended_action": recommended_action
     }
     
+    # Convert response object to JSON string (single level of encoding)
+    response_str = json.dumps(response_obj)
+    
     return {
         "prompt": incident["incident_text"],
-        "response": json.dumps(response)
+        "response": response_str  # This is a plain string containing JSON
     }
+
+
+def validate_response_format(labeled_incidents: List[Dict], num_samples: int = 3):
+    """
+    Validate that response strings can be parsed as JSON.
+    Samples random examples to verify correct encoding.
+    """
+    print(f"\nValidating response format (sampling {num_samples} examples)...")
+    
+    if len(labeled_incidents) < num_samples:
+        num_samples = len(labeled_incidents)
+    
+    sample_indices = random.sample(range(len(labeled_incidents)), num_samples)
+    
+    for idx in sample_indices:
+        item = labeled_incidents[idx]
+        try:
+            # Try to parse the response string as JSON
+            parsed = json.loads(item["response"])
+            
+            # Verify required fields
+            required_fields = ["severity", "likely_cause", "recommended_action"]
+            missing = [f for f in required_fields if f not in parsed]
+            
+            if missing:
+                print(f"  ✗ Sample {idx}: Missing fields: {missing}")
+                print(f"    Response: {item['response']}")
+                return False
+            
+            print(f"  ✓ Sample {idx}: Valid JSON with all required fields")
+            
+        except json.JSONDecodeError as e:
+            print(f"  ✗ Sample {idx}: JSON parse error: {e}")
+            print(f"    Response: {item['response']}")
+            return False
+    
+    print(f"✓ All samples validated successfully")
+    return True
 
 
 def split_dataset(
@@ -256,6 +298,11 @@ def main():
     # Apply labeling
     print("\nApplying rule-based labels...")
     labeled_incidents = [label_incident(inc) for inc in incidents]
+    
+    # Validate response format
+    if not validate_response_format(labeled_incidents):
+        print("\nError: Response format validation failed!")
+        return 1
     
     # Show label distribution
     severity_counts = Counter()
