@@ -215,15 +215,15 @@ def check_format(parsed_json: dict, was_repaired: bool) -> str:
         return "⚠ FORMAT WARNING: Invalid severity format"
 
 
-def generate_response(incident_text: str, tokenizer, model, max_new_tokens: int = 128) -> str:
+def generate_response(incident_text: str, tokenizer, model) -> str:
     """
     Generate triage response for a given incident text using structured completion.
+    Uses improved decoding parameters for complete JSON generation.
     
     Args:
         incident_text: Raw incident text
         tokenizer: Loaded tokenizer
         model: Loaded model
-        max_new_tokens: Maximum tokens to generate
     
     Returns:
         Generated response text
@@ -235,11 +235,13 @@ def generate_response(incident_text: str, tokenizer, model, max_new_tokens: int 
     
     outputs = model.generate(
         inputs.input_ids,
-        max_new_tokens=max_new_tokens,
+        max_new_tokens=256,        # Increased from 128
+        min_new_tokens=60,         # Ensure minimum completion
         num_beams=4,
         do_sample=False,
         repetition_penalty=1.2,
         no_repeat_ngram_size=3,
+        length_penalty=0.8,        # Encourage finishing
         early_stopping=True
     )
     
@@ -384,14 +386,17 @@ def main():
     print(f"RUNNING INFERENCE ON {len(selected_samples)} TEST SAMPLES")
     print(f"{'='*70}")
     
+    # Track repair statistics
+    repair_count = 0
+    
     for i, example in enumerate(selected_samples, 1):
         # Extract incident text from prompt (after "Incident:\n")
         prompt_text = example["prompt"]
         if "Incident:\n" in prompt_text:
             incident_text = prompt_text.split("Incident:\n", 1)[1]
             # Remove the trailing instruction if present
-            if "\n\nOutput ONLY" in incident_text:
-                incident_text = incident_text.split("\n\nOutput ONLY")[0]
+            if "\n\nOutput MUST" in incident_text:
+                incident_text = incident_text.split("\n\nOutput MUST")[0]
         else:
             incident_text = prompt_text
         
@@ -402,6 +407,9 @@ def main():
         
         # Parse and repair JSON
         parsed_json, was_repaired = parse_and_repair_json(raw_output)
+        
+        if was_repaired:
+            repair_count += 1
         
         # Display results
         print(f"\n{'='*70}")
@@ -421,9 +429,11 @@ def main():
         print(f"{'-'*70}")
         print(raw_output)
         
-        print(f"\nFINAL STRUCTURED JSON:")
-        print(f"{'-'*70}")
-        print(json.dumps(parsed_json, indent=2))
+        # Only print final JSON if repair was needed
+        if was_repaired:
+            print(f"\nFINAL STRUCTURED JSON (REPAIRED):")
+            print(f"{'-'*70}")
+            print(json.dumps(parsed_json, indent=2))
         
         # Check format
         format_status = check_format(parsed_json, was_repaired)
@@ -443,6 +453,13 @@ def main():
     print(f"{'='*70}")
     print(f"\nModel: {model_path}")
     print(f"Test samples evaluated: {len(selected_samples)} of {len(test_data)}")
+    print(f"Samples requiring repair: {repair_count} of {len(selected_samples)}")
+    
+    if repair_count == 0:
+        print(f"\n✓ SUCCESS: All outputs were valid JSON without repair!")
+    else:
+        print(f"\n⚠ Note: {repair_count} sample(s) required auto-repair")
+    
     print(f"\nThis demonstrates the fine-tuned model's ability to:")
     print(f"  - Parse incident log patterns")
     print(f"  - Classify severity levels")
