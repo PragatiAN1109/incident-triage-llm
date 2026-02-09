@@ -17,22 +17,24 @@ def assign_severity(incident: Dict) -> str:
     Assign severity based on WARN/ERROR counts and keyword presence.
     
     Rules:
-    - SEV-1 (Critical): 6+ WARN or any ERROR, or keywords like "exception"
-    - SEV-2 (High): 3-5 WARN
-    - SEV-3 (Low): 0-2 WARN (mostly INFO)
+    - SEV-1 (Critical): any ERROR/FATAL OR critical keywords OR "exception while serving" OR WARN >= 4
+    - SEV-2 (High): WARN count 2-3
+    - SEV-3 (Low): WARN count 0-1
     """
     levels_count = incident["stats"]["levels_count"]
     warn_count = levels_count.get("WARN", 0)
     error_count = levels_count.get("ERROR", 0)
+    fatal_count = levels_count.get("FATAL", 0)
     incident_text_lower = incident["incident_text"].lower()
     
     # Check for critical keywords
-    critical_keywords = ["exception", "error", "fatal", "failed", "refused", "denied"]
+    critical_keywords = ["exception", "fatal", "error", "failed"]
     has_critical = any(kw in incident_text_lower for kw in critical_keywords)
     
-    if error_count > 0 or warn_count >= 6 or has_critical:
+    # SEV-1: any ERROR/FATAL OR critical keywords OR "exception while serving" OR WARN >= 4
+    if error_count > 0 or fatal_count > 0 or has_critical or "exception while serving" in incident_text_lower or warn_count >= 4:
         return "SEV-1"
-    elif warn_count >= 3:
+    elif warn_count >= 2:
         return "SEV-2"
     else:
         return "SEV-3"
@@ -41,26 +43,37 @@ def assign_severity(incident: Dict) -> str:
 def assign_likely_cause(incident: Dict) -> str:
     """
     Infer likely cause from incident text keywords.
+    Uses strict priority order (first match wins).
     
-    Categories:
-    - Block serving exception
-    - Packet responder termination
-    - Network connectivity issue
-    - Service degradation
+    Priority order:
+    1. Block serving exception
+    2. Network connectivity issue
+    3. Service degradation
+    4. Packet responder termination
+    5. HDFS operational event (default)
     """
     incident_text_lower = incident["incident_text"].lower()
     
-    # Check for specific patterns
+    # Priority 1: Block serving exception
     if "exception while serving" in incident_text_lower:
         return "Block serving exception"
-    elif "packetresponder" in incident_text_lower and "terminating" in incident_text_lower:
-        return "Packet responder termination"
-    elif "timeout" in incident_text_lower or "refused" in incident_text_lower:
+    
+    # Priority 2: Network connectivity issue
+    network_keywords = ["timeout", "refused", "unreachable", "disconnect"]
+    if any(kw in incident_text_lower for kw in network_keywords):
         return "Network connectivity issue"
-    elif "slow" in incident_text_lower or "lag" in incident_text_lower:
+    
+    # Priority 3: Service degradation
+    degradation_keywords = ["slow", "lag", "backlog", "thrott"]
+    if any(kw in incident_text_lower for kw in degradation_keywords):
         return "Service degradation"
-    else:
-        return "HDFS operational event"
+    
+    # Priority 4: Packet responder termination
+    if "packetresponder" in incident_text_lower and "terminating" in incident_text_lower:
+        return "Packet responder termination"
+    
+    # Priority 5: Default
+    return "HDFS operational event"
 
 
 def assign_recommended_action(likely_cause: str) -> str:
@@ -141,6 +154,42 @@ def split_dataset(
     random.shuffle(test_data)
     
     return train_data, val_data, test_data
+
+
+def print_split_stats(train_data: List[Dict], val_data: List[Dict], test_data: List[Dict]):
+    """
+    Print detailed statistics for each split.
+    """
+    def get_severity_dist(data):
+        counts = Counter()
+        for item in data:
+            response_data = json.loads(item["response"])
+            counts[response_data["severity"]] += 1
+        return counts
+    
+    print(f"\n{'='*60}")
+    print(f"SPLIT STATISTICS")
+    print(f"{'='*60}")
+    
+    total = len(train_data) + len(val_data) + len(test_data)
+    print(f"Total samples: {total}")
+    
+    print(f"\nTrain: {len(train_data)} samples")
+    train_sev = get_severity_dist(train_data)
+    for sev in sorted(train_sev.keys()):
+        print(f"  {sev}: {train_sev[sev]}")
+    
+    print(f"\nValidation: {len(val_data)} samples")
+    val_sev = get_severity_dist(val_data)
+    for sev in sorted(val_sev.keys()):
+        print(f"  {sev}: {val_sev[sev]}")
+    
+    print(f"\nTest: {len(test_data)} samples")
+    test_sev = get_severity_dist(test_data)
+    for sev in sorted(test_sev.keys()):
+        print(f"  {sev}: {test_sev[sev]}")
+    
+    print(f"{'='*60}")
 
 
 def main():
@@ -236,9 +285,8 @@ def main():
         args.seed
     )
     
-    print(f"  Train: {len(train_data)} samples")
-    print(f"  Validation: {len(val_data)} samples")
-    print(f"  Test: {len(test_data)} samples")
+    # Print detailed split statistics
+    print_split_stats(train_data, val_data, test_data)
     
     # Create output directory
     output_dir = Path(args.output_dir)
