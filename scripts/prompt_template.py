@@ -32,11 +32,7 @@ JSON:
 Incident:
 {incident_text}
 
-Output MUST be valid JSON object with exactly these 3 keys.
-Do not output partial JSON. Do not stop early.
-severity must be one of: SEV-1 or SEV-3.
-likely_cause must be one of: Packet responder termination OR Block serving exception.
-
+Complete the JSON with valid values. Ensure all fields have proper quoted strings.
 Output ONLY the completed JSON:
 """
     return prompt
