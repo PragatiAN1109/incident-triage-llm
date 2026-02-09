@@ -67,6 +67,49 @@ def preprocess_function(examples, tokenizer, max_input_length=512, max_target_le
     return model_inputs
 
 
+def create_training_args(output_dir: str):
+    """
+    Create Seq2SeqTrainingArguments compatible with different transformers versions.
+    Handles both 'eval_strategy' (newer) and 'evaluation_strategy' (older) parameter names.
+    """
+    # Build arguments dict with newer parameter names (eval_strategy)
+    args_dict = {
+        "output_dir": output_dir,
+        "eval_strategy": "epoch",
+        "save_strategy": "epoch",
+        "logging_strategy": "steps",
+        "logging_steps": 50,
+        "num_train_epochs": 3,
+        "per_device_train_batch_size": 4,
+        "per_device_eval_batch_size": 4,
+        "learning_rate": 5e-5,
+        "weight_decay": 0.01,
+        "save_total_limit": 2,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
+        "seed": 42,
+        "report_to": "none",
+        "predict_with_generate": False,
+        "push_to_hub": False
+    }
+    
+    # Try with newer parameter names first
+    try:
+        return Seq2SeqTrainingArguments(**args_dict)
+    except TypeError as e:
+        error_msg = str(e)
+        
+        # Handle eval_strategy → evaluation_strategy
+        if "eval_strategy" in error_msg or "evaluation_strategy" in error_msg:
+            args_dict["evaluation_strategy"] = args_dict.pop("eval_strategy")
+            print("  Note: Using 'evaluation_strategy' (older transformers version)")
+            return Seq2SeqTrainingArguments(**args_dict)
+        else:
+            # Re-raise if it's a different error
+            raise
+
+
 def main():
     """
     Main training pipeline.
@@ -127,28 +170,9 @@ def main():
         padding=True
     )
     
-    # Training arguments
+    # Training arguments (with version compatibility)
     print(f"\nConfiguring training parameters...")
-    training_args = Seq2SeqTrainingArguments(
-        output_dir=output_dir,
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-        logging_strategy="steps",
-        logging_steps=50,
-        num_train_epochs=3,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        learning_rate=5e-5,
-        weight_decay=0.01,
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        seed=42,
-        report_to="none",  # Disable wandb/tensorboard
-        predict_with_generate=False,  # Use teacher forcing for faster training
-        push_to_hub=False
-    )
+    training_args = create_training_args(output_dir)
     
     print(f"  Output directory: {output_dir}")
     print(f"  Epochs: {training_args.num_train_epochs}")
