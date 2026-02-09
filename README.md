@@ -88,16 +88,40 @@ Labels are assigned deterministically using keyword-based heuristics:
 
 ### Prompt/Response Format
 
-Each training example contains:
-- **prompt**: The `incident_text` field (service + log lines)
+**UPDATED FOR TASK 8**: Each training example now uses **structured JSON completion prompts** for better generation stability on small datasets.
+
+- **prompt**: Structured template with JSON schema + incident text (uses `prompt_template.py`)
 - **response**: A JSON string with three fields (single-level encoding, NOT double-escaped)
+
+**Example prompt format:**
+```
+You are an incident triage assistant.
+Fill in the JSON template below using the incident information.
+
+JSON:
+{
+  "severity": "",
+  "likely_cause": "",
+  "recommended_action": ""
+}
+
+Incident:
+<incident logs>
+
+Output ONLY the completed JSON:
+```
 
 **Example JSONL line:**
 ```json
-{"prompt":"service: hdfs-datanode\ninfo...","response":"{\"severity\":\"SEV-3\",\"likely_cause\":\"Packet responder termination\",\"recommended_action\":\"Monitor DataNode...\"}"}
+{"prompt":"You are an incident triage assistant.\nFill in the JSON template...", "response":"{\"severity\":\"SEV-3\",\"likely_cause\":\"Packet responder termination\",\"recommended_action\":\"Monitor DataNode...\"}"}
 ```
 
-**Response Validation**: The dataset builder automatically validates that response strings are parseable as JSON and contain all required fields (severity, likely_cause, recommended_action). This prevents encoding issues that could impair model training.
+**Response Validation**: The dataset builder automatically validates that:
+- Response strings are parseable as JSON
+- All required fields are present (severity, likely_cause, recommended_action)
+- Prompts contain the expected JSON template structure
+
+This prevents encoding issues and ensures training/inference consistency.
 
 ### Split Ratios and Reproducibility
 
@@ -129,24 +153,15 @@ Test: 9 samples
 
 ```bash
 # Default: reads from data/processed/sample_incidents_50.jsonl
-python3 scripts/build_dataset.py
+python3 scripts/build_dataset.py --input data/processed/sample_incidents_50.jsonl --output_dir data/final --seed 42
 
-# Custom parameters
-python3 scripts/build_dataset.py \
-  --input data/processed/sample_incidents_50.jsonl \
-  --output_dir data/final \
-  --train_ratio 0.7 \
-  --val_ratio 0.15 \
-  --test_ratio 0.15 \
-  --seed 42
+# This will overwrite existing files:
+# - data/final/train.jsonl
+# - data/final/val.jsonl
+# - data/final/test.jsonl
 ```
 
-**Output files:**
-- `data/final/train.jsonl`
-- `data/final/val.jsonl`
-- `data/final/test.jsonl`
-
-Each file contains JSON lines with `prompt` and `response` fields ready for fine-tuning.
+Each file contains JSON lines with `prompt` (structured template + incident) and `response` fields ready for fine-tuning.
 
 ## Model Selection
 
@@ -179,7 +194,7 @@ This script demonstrates:
 
 ### Training Pipeline
 
-The fine-tuning pipeline (`scripts/train.py`) uses the **Hugging Face Transformers Trainer API** with Config C (best configuration from hyperparameter tuning).
+The fine-tuning pipeline uses the **Hugging Face Transformers Trainer API** with Config C (best configuration from hyperparameter tuning).
 
 **Important**: The Trainer relies on Accelerate for distributed training support. Ensure all dependencies are installed:
 ```bash
@@ -189,7 +204,7 @@ pip install -r requirements.txt
 **Training Process:**
 1. Load `google/flan-t5-small` base model and tokenizer
 2. Load train and validation datasets from `data/final/`
-3. Tokenize inputs (prompts) and targets (JSON responses)
+3. Tokenize inputs (prompts with structured templates) and targets (JSON responses)
 4. Train using Config C hyperparameters (LR=5e-5, BS=2, Epochs=5)
 5. Save checkpoints and final model to `results/config_c_(higher_capacity)/final-model`
 
@@ -227,14 +242,14 @@ The test set is **not tokenized or used during training** - it remains completel
 
 ### How to Run Training
 
-**Install dependencies first:**
+**Run fine-tuning with Config C only (recommended):**
 ```bash
-pip install -r requirements.txt
+python3 scripts/train_experiments.py --only_best
 ```
 
-**Run fine-tuning with Config C:**
+**Or run all experiments for comparison:**
 ```bash
-python3 scripts/train.py
+python3 scripts/train_experiments.py
 ```
 
 **Output:**
@@ -266,84 +281,130 @@ Config C was chosen as the optimal configuration due to achieving the **lowest v
 
 All experiments used a fixed random seed (42) for deterministic data splitting, tokenization, and model initialization. Given the relatively small dataset size (33 training samples), individual run results may exhibit minor variance due to numerical precision and hardware differences. However, the performance trends across configurations remain consistent, with Config C consistently outperforming the alternatives in validation loss.
 
-## Task 8: Final Evaluation & Inference
+## Task 8: Final Evaluation & Inference (FIXED)
 
 The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data using a **structured JSON completion** approach optimized for small datasets.
 
-### Structured Completion Approach
+### Structured Completion Approach - FIX FOR SCHEMA-ONLY OUTPUTS
 
-**Why Structured Completion**: With small training datasets (33 samples), models can exhibit "schema-only degeneration" where they learn to output JSON field names without values. To address this, the inference script uses a **slot-filling formulation** that provides an explicit JSON template with empty slots for the model to complete:
+**Problem Solved**: With small training datasets (33 samples), models can exhibit "schema-only degeneration" where they learn to output JSON field names (keys) without values. This happens when the task formulation is too weak for limited data.
+
+**Solution**: We switched to **structured JSON completion prompts** that provide an explicit template with empty slots for the model to fill. Both training and inference now use the exact same prompt template from `scripts/prompt_template.py`:
 
 ```
 You are an incident triage assistant.
 Fill in the JSON template below using the incident information.
+
 JSON:
 {
   "severity": "",
   "likely_cause": "",
   "recommended_action": ""
 }
+
 Incident:
 <incident logs>
+
+Output ONLY the completed JSON:
 ```
 
-This approach:
-- Provides explicit structure scaffolding
-- Guides the model to fill specific slots rather than generate schema from scratch
-- Reduces likelihood of incomplete or malformed outputs
-- Works better with limited training data
+**Why This Works:**
+- **Slot-filling formulation**: Guides the model to complete specific fields rather than generate schema from scratch
+- **Explicit structure scaffolding**: Provides the JSON template in every example, reinforcing the expected format
+- **Training-inference consistency**: Same template used everywhere prevents distribution mismatch
+- **Better for small datasets**: Reduces task complexity and stabilizes generation behavior
 
-### What This Script Demonstrates
+### Shared Prompt Template
 
-The script loads the best-performing model (Config C from Task 7) and runs inference on held-out test samples to provide a qualitative evaluation of the model's capabilities:
+**Key Implementation Detail**: The `scripts/prompt_template.py` module contains the `format_incident_prompt()` function that is now used by:
+1. **Dataset builder** (`build_dataset.py`) - wraps incident text during dataset creation
+2. **Inference script** (`inference.py`) - wraps incident text during prediction
 
-- **Incident parsing**: Understanding normalized HDFS log patterns
-- **Severity classification**: Categorizing incidents as SEV-1, SEV-2, or SEV-3
-- **Cause identification**: Identifying likely root causes from log signatures
-- **Action generation**: Producing actionable remediation recommendations
+This ensures perfect consistency between training and inference.
 
-**Automatic Model Loading**: The inference script uses a priority-based loading strategy:
-1. First checks for `results/config_c_(higher_capacity)/final-model` (saved after training completes)
-2. Falls back to latest checkpoint by step number if final-model doesn't exist
+### Model Loading Strategy
+
+The inference script uses a priority-based loading strategy:
+1. **First priority**: `results/config_c_(higher_capacity)/final-model` (saved after training completes)
+2. **Fallback**: Latest checkpoint by step number if final-model doesn't exist
 3. Displays which model/checkpoint is being loaded
 
-**Decoding Constraints**: To ensure stable structured outputs, the script uses:
-- Structured JSON template for slot-filling
-- Repetition penalty (1.2) to reduce redundant text
-- N-gram blocking (size 3) to prevent repeating phrases
-- Beam search (4 beams) for quality
-- Reduced max tokens (128) for concise responses
-- Format validation to check JSON structure and severity values
+### Improved Decoding Parameters
 
-### How to Run
+To ensure stable structured outputs:
+- **max_new_tokens**: 128 (concise responses)
+- **num_beams**: 4 (beam search for quality)
+- **do_sample**: False (deterministic generation)
+- **repetition_penalty**: 1.2 (reduce redundant text)
+- **no_repeat_ngram_size**: 3 (prevent repeating phrases)
+- **early_stopping**: True (stop when complete)
 
-**First, rebuild the dataset (ensures correct response encoding):**
+### Format Validation
+
+After generation, the script validates:
+- Output is valid JSON (can be parsed)
+- Contains all required keys (severity, likely_cause, recommended_action)
+- Severity matches regex pattern `^SEV-[123]$`
+- Displays: "✓ FORMAT OK" or "⚠ FORMAT WARNING"
+
+### Diverse Sample Selection
+
+The script automatically selects diverse test samples to demonstrate variety:
+- Ensures at least 1 sample with **Packet responder termination**
+- Ensures at least 1 sample with **Block serving exception**
+- Fills remaining slots with other incident types
+- Falls back to any available samples if specific types not found
+
+### Complete Workflow
+
+**Step 1: Rebuild dataset with structured prompts**
 ```bash
-python3 scripts/build_dataset.py
+python3 scripts/build_dataset.py --input data/processed/sample_incidents_50.jsonl --output_dir data/final --seed 42
 ```
 
-**Then run training with Config C:**
+**Step 2: Train best model (Config C only)**
 ```bash
-python3 scripts/train.py
+python3 scripts/train_experiments.py --only_best
 ```
+This saves the model to `results/config_c_(higher_capacity)/final-model/`
 
-**Finally, run inference:**
+**Step 3: Run inference**
 ```bash
 python3 scripts/inference.py
 ```
 
 **Optional arguments:**
 ```bash
-# Custom model path
+# Use different model
 python3 scripts/inference.py --model_path results/config_a_(baseline)
 
 # More test samples
 python3 scripts/inference.py --num_samples 5
 ```
 
-**Output**: The script displays test samples with:
-- Input incident logs (truncated for readability)
-- Model-generated triage response with format validation
-- Ground-truth reference response
+### Output Format
 
-This provides a side-by-side comparison to assess the model's learned behavior on unseen data.
+The script displays for each test sample:
+- **INPUT**: Incident logs (first 6 lines shown)
+- **RAW MODEL OUTPUT**: Exact generated text
+- **FORMAT CHECK**: Validation status (FORMAT OK or WARNING)
+- **GROUND TRUTH**: Expected response for comparison
+
+### What This Demonstrates
+
+The fine-tuned model's capabilities:
+- **Incident parsing**: Understanding normalized HDFS log patterns
+- **Severity classification**: Categorizing incidents as SEV-1, SEV-2, or SEV-3
+- **Cause identification**: Identifying likely root causes from log signatures
+- **Action generation**: Producing actionable remediation recommendations
+- **Stable JSON output**: Generating complete, valid JSON (not just schema keys)
+
+### Key Improvements in Task 8
+
+1. **Structured prompts everywhere**: Training and inference use identical templates
+2. **Validation during dataset build**: Ensures template is present in all examples
+3. **Final model saving**: Training explicitly saves to `final-model` directory
+4. **Improved decoding**: Optimized generation parameters for stability
+5. **Format checking**: Automatic validation of JSON structure and content
+6. **Diverse sampling**: Ensures variety in demonstrated test cases
+7. **--only_best flag**: Train only Config C without running all experiments
