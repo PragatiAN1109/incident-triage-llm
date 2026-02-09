@@ -79,7 +79,7 @@ def main():
     print("="*70)
     
     # Configuration
-    model_path = "results/config_c_higher_capacity"
+    model_path = "results/config_c_(higher_capacity)"
     test_file = "data/final/test.jsonl"
     num_samples = 3  # Number of samples to display
     
