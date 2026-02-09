@@ -12,21 +12,27 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
-def find_latest_checkpoint(base_path: Path) -> Path:
+def find_model_path(base_path: Path) -> Path:
     """
-    Find the latest checkpoint in a directory by step number.
+    Find the model path, checking for final-model first, then latest checkpoint.
     
     Args:
-        base_path: Base directory to search for checkpoints
+        base_path: Base directory to search
     
     Returns:
-        Path to the latest checkpoint, or base_path if no checkpoints found
+        Path to the model
     """
-    # Check if base_path has config.json (is a valid model)
+    # Priority 1: Check for final-model subdirectory
+    final_model_path = base_path / "final-model"
+    if final_model_path.exists() and (final_model_path / "config.json").exists():
+        print(f"Loading final model from: {final_model_path}")
+        return final_model_path
+    
+    # Priority 2: Check if base_path itself has config.json
     if (base_path / "config.json").exists():
         return base_path
     
-    # Look for checkpoint subdirectories
+    # Priority 3: Look for checkpoint subdirectories
     checkpoint_pattern = re.compile(r'checkpoint-(\d+)')
     checkpoints = []
     
@@ -41,18 +47,18 @@ def find_latest_checkpoint(base_path: Path) -> Path:
         # Sort by step number and get the latest
         checkpoints.sort(key=lambda x: x[0], reverse=True)
         latest_step, latest_path = checkpoints[0]
-        print(f"No config.json found at {base_path}")
+        print(f"No final-model found at {base_path}")
         print(f"Loading latest checkpoint: {latest_path.name}")
         return latest_path
     
-    # No checkpoints found, return original path
+    # No valid model found
     return base_path
 
 
 def load_model(model_path: str):
     """
     Load fine-tuned model and tokenizer.
-    Automatically detects and loads latest checkpoint if base path is not a valid model.
+    Automatically detects final-model or latest checkpoint.
     
     Args:
         model_path: Path to the fine-tuned model directory
@@ -65,10 +71,10 @@ def load_model(model_path: str):
     if not base_path.exists():
         raise FileNotFoundError(f"Model path not found: {model_path}")
     
-    # Find the actual model path (may be a checkpoint subdirectory)
-    resolved_path = find_latest_checkpoint(base_path)
+    # Find the actual model path
+    resolved_path = find_model_path(base_path)
     
-    print(f"\nLoading fine-tuned model from: {resolved_path}")
+    print(f"Loading model from: {resolved_path}")
     tokenizer = AutoTokenizer.from_pretrained(str(resolved_path))
     model = AutoModelForSeq2SeqLM.from_pretrained(str(resolved_path))
     print(f"✓ Model loaded successfully")
@@ -208,7 +214,7 @@ def main():
     # Verify paths exist
     if not Path(model_path).exists():
         print(f"\nError: Model path not found: {model_path}")
-        print("Please run training experiments first: python3 scripts/train_experiments.py")
+        print("Please run training first: python3 scripts/train.py")
         return 1
     
     if not Path(test_file).exists():
