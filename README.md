@@ -278,7 +278,7 @@ All experiments used a fixed random seed (42) for deterministic data splitting, 
 
 ## Task 8: Final Evaluation & Inference
 
-The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the latest checkpoint from the best-performing configuration (Config C).
+The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the latest checkpoint from the best-performing configuration (Config C) and applies decoding constraints to ensure stable, structured outputs.
 
 ### What This Script Demonstrates
 
@@ -289,7 +289,15 @@ The script loads the best-performing model (Config C from Task 7) and runs infer
 - **Cause identification**: Identifying likely root causes from log signatures
 - **Action generation**: Producing actionable remediation recommendations
 
-**Automatic Checkpoint Loading**: The inference script automatically detects and loads the latest checkpoint under `results/config_c_(higher_capacity)` by finding the checkpoint with the highest step number (e.g., `checkpoint-85`). This handles the case where the experiment directory contains only checkpoint subdirectories rather than a consolidated model.
+**Automatic Checkpoint Loading**: The inference script automatically detects and loads the latest checkpoint under `results/config_c_(higher_capacity)` by finding the checkpoint with the highest step number (e.g., `checkpoint-85`).
+
+**Decoding Constraints**: To ensure stable structured outputs, the script uses:
+- Instruction wrapping to guide JSON generation
+- Repetition penalty (1.2) to reduce redundant text
+- N-gram blocking (size 3) to prevent repeating phrases
+- Beam search (4 beams) for quality
+- Reduced max tokens (128) for concise responses
+- Format validation to check JSON structure and severity values
 
 ### How to Run
 
@@ -314,7 +322,7 @@ python3 scripts/inference.py --num_samples 5
 
 **Output**: The script displays test samples with:
 - Input incident logs (truncated for readability)
-- Model-generated triage response
+- Model-generated triage response with format validation
 - Ground-truth reference response
 
 This provides a side-by-side comparison to assess the model's learned behavior on unseen data.
