@@ -29,7 +29,10 @@ def load_jsonl_dataset(file_path: str) -> Dataset:
 
 
 def preprocess_function(examples, tokenizer, max_input_length=512, max_target_length=256):
-    """Tokenize inputs and targets for seq2seq training."""
+    """
+    Tokenize inputs and targets for seq2seq training.
+    Appends newline to response strings to help model learn proper end-of-output.
+    """
     model_inputs = tokenizer(
         examples["prompt"],
         max_length=max_input_length,
@@ -37,8 +40,11 @@ def preprocess_function(examples, tokenizer, max_input_length=512, max_target_le
         padding=False
     )
     
+    # Append newline to each response to help model learn end-of-sequence
+    responses_with_newline = [resp + "\n" for resp in examples["response"]]
+    
     labels = tokenizer(
-        examples["response"],
+        responses_with_newline,
         max_length=max_target_length,
         truncation=True,
         padding=False
@@ -216,6 +222,7 @@ def main():
     print(f"  Validation: {len(val_dataset)} samples")
     
     print(f"\nTokenizing datasets...")
+    print(f"  Note: Appending newline to responses for better end-of-sequence learning")
     tokenized_train = train_dataset.map(
         lambda x: preprocess_function(x, tokenizer),
         batched=True,
