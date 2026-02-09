@@ -10,6 +10,7 @@ import argparse
 import re
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+from prompt_template import format_incident_prompt
 
 
 def find_model_path(base_path: Path) -> Path:
@@ -81,31 +82,6 @@ def load_model(model_path: str):
     return tokenizer, model
 
 
-def wrap_prompt_for_completion(incident_text: str) -> str:
-    """
-    Wrap the incident prompt as a structured JSON completion task.
-    Provides template with empty slots to guide slot-filling behavior.
-    
-    Args:
-        incident_text: Raw incident text
-    
-    Returns:
-        Structured completion prompt
-    """
-    prompt = f"""You are an incident triage assistant.
-Fill in the JSON template below using the incident information.
-JSON:
-{{
-  "severity": "",
-  "likely_cause": "",
-  "recommended_action": ""
-}}
-Incident:
-{incident_text}
-"""
-    return prompt
-
-
 def check_format(generated_text: str) -> str:
     """
     Check if generated text contains valid JSON format.
@@ -139,12 +115,12 @@ def check_format(generated_text: str) -> str:
         return "⚠ FORMAT WARNING: Not valid JSON"
 
 
-def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 128) -> str:
+def generate_response(incident_text: str, tokenizer, model, max_new_tokens: int = 128) -> str:
     """
-    Generate triage response for a given incident prompt using structured completion.
+    Generate triage response for a given incident text using structured completion.
     
     Args:
-        prompt: Input incident text
+        incident_text: Raw incident text
         tokenizer: Loaded tokenizer
         model: Loaded model
         max_new_tokens: Maximum tokens to generate
@@ -152,19 +128,19 @@ def generate_response(prompt: str, tokenizer, model, max_new_tokens: int = 128) 
     Returns:
         Generated response text
     """
-    # Wrap prompt for structured completion
-    completion_prompt = wrap_prompt_for_completion(prompt)
+    # Use the same template as training
+    prompt = format_incident_prompt(incident_text)
     
-    inputs = tokenizer(completion_prompt, return_tensors="pt", max_length=512, truncation=True)
+    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
     
     outputs = model.generate(
         inputs.input_ids,
         max_new_tokens=max_new_tokens,
         num_beams=4,
-        early_stopping=True,
-        do_sample=False,  # Deterministic generation
-        repetition_penalty=1.2,  # Penalize repetition
-        no_repeat_ngram_size=3  # Prevent repeating 3-grams
+        do_sample=False,
+        repetition_penalty=1.2,
+        no_repeat_ngram_size=3,
+        early_stopping=True
     )
     
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -186,6 +162,64 @@ def load_test_data(test_file: str):
         for line in f:
             test_data.append(json.loads(line))
     return test_data
+
+
+def select_diverse_samples(test_data: list, num_samples: int = 3) -> list:
+    """
+    Select diverse test samples ensuring variety in incident types.
+    Ensures at least one Packet responder termination and one Block serving exception.
+    
+    Args:
+        test_data: List of test examples
+        num_samples: Number of samples to select
+    
+    Returns:
+        List of selected test examples
+    """
+    # First, try to find one of each target type
+    packet_responder = None
+    block_serving = None
+    other_samples = []
+    
+    for item in test_data:
+        # Extract incident text from prompt (after "Incident:\n")
+        prompt_text = item.get("prompt", "")
+        if "Incident:\n" in prompt_text:
+            incident_text = prompt_text.split("Incident:\n", 1)[1].lower()
+        else:
+            incident_text = ""
+        
+        response_data = json.loads(item["response"])
+        likely_cause = response_data.get("likely_cause", "")
+        
+        if "packet responder" in likely_cause.lower() and packet_responder is None:
+            packet_responder = item
+        elif "block serving" in likely_cause.lower() and block_serving is None:
+            block_serving = item
+        else:
+            other_samples.append(item)
+    
+    # Build the sample list
+    selected = []
+    if packet_responder:
+        selected.append(packet_responder)
+    if block_serving:
+        selected.append(block_serving)
+    
+    # Fill remaining slots from other samples
+    remaining_needed = num_samples - len(selected)
+    if remaining_needed > 0 and other_samples:
+        selected.extend(other_samples[:remaining_needed])
+    
+    # If we still need more samples, just take from the beginning of test_data
+    if len(selected) < num_samples:
+        for item in test_data:
+            if item not in selected:
+                selected.append(item)
+                if len(selected) >= num_samples:
+                    break
+    
+    return selected[:num_samples]
 
 
 def main():
@@ -241,20 +275,30 @@ def main():
     test_data = load_test_data(test_file)
     print(f"✓ Loaded {len(test_data)} test samples")
     
+    # Select diverse samples
+    selected_samples = select_diverse_samples(test_data, num_samples)
+    print(f"\nSelected {len(selected_samples)} diverse test samples for demonstration")
+    
     # Run inference on samples
     print(f"\n{'='*70}")
-    print(f"RUNNING INFERENCE ON {min(num_samples, len(test_data))} TEST SAMPLES")
+    print(f"RUNNING INFERENCE ON {len(selected_samples)} TEST SAMPLES")
     print(f"{'='*70}")
     
-    for i, example in enumerate(test_data[:num_samples], 1):
-        prompt = example["prompt"]
+    for i, example in enumerate(selected_samples, 1):
+        # Extract incident text from prompt (after "Incident:\n")
+        prompt_text = example["prompt"]
+        if "Incident:\n" in prompt_text:
+            incident_text = prompt_text.split("Incident:\n", 1)[1]
+            # Remove the trailing instruction if present
+            if "\n\nOutput ONLY" in incident_text:
+                incident_text = incident_text.split("\n\nOutput ONLY")[0]
+        else:
+            incident_text = prompt_text
+        
         ground_truth = example["response"]
         
         # Generate model output
-        generated = generate_response(prompt, tokenizer, model)
-        
-        # Check format
-        format_status = check_format(generated)
+        generated = generate_response(incident_text, tokenizer, model)
         
         # Display results
         print(f"\n{'='*70}")
@@ -263,16 +307,19 @@ def main():
         
         print(f"\nINPUT:")
         print(f"{'-'*70}")
-        # Show first 6 lines of prompt
-        prompt_lines = prompt.split('\n')
-        for line in prompt_lines[:6]:
+        # Show first 6 lines of incident
+        incident_lines = incident_text.strip().split('\n')
+        for line in incident_lines[:6]:
             print(line)
-        if len(prompt_lines) > 6:
-            print(f"... ({len(prompt_lines) - 6} more lines)")
+        if len(incident_lines) > 6:
+            print(f"... ({len(incident_lines) - 6} more lines)")
         
-        print(f"\nMODEL OUTPUT:")
+        print(f"\nRAW MODEL OUTPUT:")
         print(f"{'-'*70}")
         print(generated)
+        
+        # Check format
+        format_status = check_format(generated)
         print(f"\n{format_status}")
         
         print(f"\nGROUND TRUTH:")
@@ -288,12 +335,13 @@ def main():
     print("INFERENCE DEMO COMPLETE")
     print(f"{'='*70}")
     print(f"\nModel: {model_path}")
-    print(f"Test samples evaluated: {min(num_samples, len(test_data))} of {len(test_data)}")
+    print(f"Test samples evaluated: {len(selected_samples)} of {len(test_data)}")
     print(f"\nThis demonstrates the fine-tuned model's ability to:")
     print(f"  - Parse incident log patterns")
     print(f"  - Classify severity levels")
     print(f"  - Identify likely causes")
     print(f"  - Generate actionable recommendations")
+    print(f"\nUsing structured JSON completion prompts for stable generation.")
     
     return 0
 
