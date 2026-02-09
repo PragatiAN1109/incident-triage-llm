@@ -278,7 +278,7 @@ All experiments used a fixed random seed (42) for deterministic data splitting, 
 
 ## Task 8: Final Evaluation & Inference
 
-The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data.
+The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the latest checkpoint from the best-performing configuration (Config C).
 
 ### What This Script Demonstrates
 
@@ -289,13 +289,30 @@ The script loads the best-performing model (Config C from Task 7) and runs infer
 - **Cause identification**: Identifying likely root causes from log signatures
 - **Action generation**: Producing actionable remediation recommendations
 
+**Automatic Checkpoint Loading**: The inference script automatically detects and loads the latest checkpoint under `results/config_c_(higher_capacity)` by finding the checkpoint with the highest step number (e.g., `checkpoint-85`). This handles the case where the experiment directory contains only checkpoint subdirectories rather than a consolidated model.
+
 ### How to Run
 
+**First, run the training experiments to generate models:**
+```bash
+python3 scripts/train_experiments.py
+```
+
+**Then run inference on the best model:**
 ```bash
 python3 scripts/inference.py
 ```
 
-**Output**: The script displays 3 test samples with:
+**Optional arguments:**
+```bash
+# Custom model path
+python3 scripts/inference.py --model_path results/config_a_(baseline)
+
+# More test samples
+python3 scripts/inference.py --num_samples 5
+```
+
+**Output**: The script displays test samples with:
 - Input incident logs (truncated for readability)
 - Model-generated triage response
 - Ground-truth reference response
