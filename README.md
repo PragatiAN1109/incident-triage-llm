@@ -147,3 +147,30 @@ python3 scripts/build_dataset.py \
 - `data/final/test.jsonl`
 
 Each file contains JSON lines with `prompt` and `response` fields ready for fine-tuning.
+
+## Model Selection
+
+### Chosen Model: `google/flan-t5-small`
+
+**Why This Model Fits:**
+- **Instruction-tuned**: FLAN-T5 is specifically fine-tuned for prompt→response tasks, making it ideal for structured triage output generation
+- **Lightweight**: The "small" variant (80M parameters) enables fast experimentation, rapid iteration, and easy reproducibility on standard hardware
+- **Sequence-to-sequence architecture**: Well-suited for generating structured JSON responses from log incident prompts
+- **Strong baseline**: Despite its size, FLAN-T5-small provides a solid foundation for task-specific fine-tuning
+
+**Tradeoffs:**
+- **Quality ceiling**: Smaller models may cap maximum achievable quality compared to larger variants (base, large, xl, xxl)
+- **Benefit**: Enables rapid prototyping, faster training cycles, and reproducible experiments without requiring extensive computational resources
+
+### Model Setup
+
+Use `scripts/model_setup.py` to load the base model and run baseline inference before fine-tuning:
+
+```bash
+python3 scripts/model_setup.py
+```
+
+This script demonstrates:
+- Loading the pre-trained model and tokenizer
+- Running baseline inference on a sample incident
+- Comparing generated output to ground-truth labels
