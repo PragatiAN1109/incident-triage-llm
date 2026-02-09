@@ -268,7 +268,30 @@ All experiments used a fixed random seed (42) for deterministic data splitting, 
 
 ## Task 8: Final Evaluation & Inference
 
-The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data. The script automatically loads the best model and applies decoding constraints to ensure stable, structured outputs.
+The inference script (`scripts/inference.py`) demonstrates the fine-tuned model's performance on completely unseen test data using a **structured JSON completion** approach optimized for small datasets.
+
+### Structured Completion Approach
+
+**Why Structured Completion**: With small training datasets (33 samples), models can exhibit "schema-only degeneration" where they learn to output JSON field names without values. To address this, the inference script uses a **slot-filling formulation** that provides an explicit JSON template with empty slots for the model to complete:
+
+```
+You are an incident triage assistant.
+Fill in the JSON template below using the incident information.
+JSON:
+{
+  "severity": "",
+  "likely_cause": "",
+  "recommended_action": ""
+}
+Incident:
+<incident logs>
+```
+
+This approach:
+- Provides explicit structure scaffolding
+- Guides the model to fill specific slots rather than generate schema from scratch
+- Reduces likelihood of incomplete or malformed outputs
+- Works better with limited training data
 
 ### What This Script Demonstrates
 
@@ -285,7 +308,7 @@ The script loads the best-performing model (Config C from Task 7) and runs infer
 3. Displays which model/checkpoint is being loaded
 
 **Decoding Constraints**: To ensure stable structured outputs, the script uses:
-- Instruction wrapping to guide JSON generation
+- Structured JSON template for slot-filling
 - Repetition penalty (1.2) to reduce redundant text
 - N-gram blocking (size 3) to prevent repeating phrases
 - Beam search (4 beams) for quality
