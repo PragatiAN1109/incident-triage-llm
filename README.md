@@ -99,12 +99,12 @@ A production-ready ML system that provides:
 
 ### 🎯 Production-Ready Features
 
-- ✅ Live web demo (Hugging Face Space)
-- ✅ Comprehensive evaluation metrics
-- ✅ Detailed error analysis
-- ✅ Professional documentation
-- ✅ Reproducible with fixed seeds
-- ✅ Ethical considerations documented
+- Live web demo (Hugging Face Space)
+- Comprehensive evaluation metrics
+- Detailed error analysis
+- Professional documentation
+- Reproducible with fixed seeds
+- Ethical considerations documented
 
 ---
 
@@ -177,12 +177,12 @@ python3 scripts/generate_visualizations.py
 
 ```
 incident-triage-llm/
-├── 🚀 app.py                      # Gradio web interface (deployed)
-├── 📊 data/
+├── app.py                      # Gradio web interface (deployed)
+├── data/
 │   ├── raw/                       # Original HDFS logs (2000 lines)
 │   ├── processed/                 # Preprocessed incidents (48)
 │   └── final/                     # Train/val/test splits
-├── 🔧 scripts/
+├── scripts/
 │   ├── preprocess_logs.py         # Log preprocessing with sliding window
 │   ├── build_dataset.py           # Dataset builder with structured prompts
 │   ├── prompt_template.py         # Shared prompt template
@@ -191,14 +191,14 @@ incident-triage-llm/
 │   ├── inference.py               # Production inference pipeline
 │   ├── generate_visualizations.py # Creates 15 figures for report
 │   └── upload_to_huggingface.py   # Model deployment helper
-├── 📓 notebooks/
+├── notebooks/
 │   └── error_analysis.ipynb       # Detailed error pattern analysis
-├── 📄 docs/
+├── docs/
 │   ├── technical_report.md        # 5-7 page technical report
 │   ├── video_walkthrough_script.md # Recording guide
 │   ├── DEPLOYMENT_GUIDE.md        # HF Space deployment
 │   └── SUBMISSION_CHECKLIST.md    # Assignment completion tracker
-└── 📈 results/
+└── results/
     ├── config_c_(higher_capacity)/ # Trained model checkpoints
     ├── evaluation_metrics.json     # Test set performance
     ├── error_analysis.json         # Error patterns
@@ -288,11 +288,11 @@ Valid JSON (100% guaranteed)
 ```
 
 **Features:**
-- 🔄 Smart quote normalization
-- 🛠️ Intelligent value extraction
-- 🎯 Heuristic overrides (e.g., "exception while serving" → SEV-1)
-- ✅ Zero UNKNOWN fields
-- 📊 Repair tracking and monitoring
+- Smart quote normalization
+- Intelligent value extraction
+- Heuristic overrides (e.g., "exception while serving" → SEV-1)
+- Zero UNKNOWN fields
+- Repair tracking and monitoring
 
 ---
 
@@ -396,10 +396,10 @@ For detailed analysis: [notebooks/error_analysis.ipynb](notebooks/error_analysis
 
 ### Operational Benefits
 
-- **⏱️ MTTR Reduction**: Seconds vs minutes for initial assessment
-- **🔄 24/7 Coverage**: No human on-call needed for first-level triage
-- **📊 Consistency**: Deterministic labeling eliminates judgment variation
-- **⚡ Scalability**: 1000+ incidents/hour vs 10-20 manual reviews/hour
+- **MTTR Reduction**: Seconds vs minutes for initial assessment
+- **24/7 Coverage**: No human on-call needed for first-level triage
+- **Consistency**: Deterministic labeling eliminates judgment variation
+- **Scalability**: 1000+ incidents/hour vs 10-20 manual reviews/hour
 
 ### Business Value
 
@@ -454,8 +454,6 @@ python3 scripts/evaluate.py
 ```bash
 python3 scripts/generate_visualizations.py
 ```
-
-**Output**: 15 publication-ready figures in `results/figures/`
 
 ---
 
@@ -598,11 +596,11 @@ if "got exception while serving" in incident:
 
 **Test Set Metrics (9 samples):**
 
-- ✅ **Severity Accuracy**: 88.9% (8/9 correct)
-- ✅ **Likely Cause Accuracy**: 77.8% (7/9 correct)
-- ✅ **Recommended Action**: 66.7% (6/9 correct)
-- ✅ **Exact Match**: 66.7% (all fields correct)
-- ✅ **Valid JSON Rate**: 100% (with repair pipeline)
+- **Severity Accuracy**: 88.9% (8/9 correct)
+- **Likely Cause Accuracy**: 77.8% (7/9 correct)
+- **Recommended Action**: 66.7% (6/9 correct)
+- **Exact Match**: 66.7% (all fields correct)
+- **Valid JSON Rate**: 100% (with repair pipeline)
 
 ### Baseline Comparison
 
@@ -673,9 +671,7 @@ if "got exception while serving" in incident:
 
 - 📄 **[Technical Report](docs/technical_report.md)** - 5-7 page comprehensive analysis
 - 🎥 **[Video Walkthrough Script](docs/video_walkthrough_script.md)** - Recording guide
-- 📊 **[Visualization Guide](docs/VISUALIZATION_GUIDE.md)** - How to generate 15 figures
 - 🚀 **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)** - Hugging Face Space setup
-- ✅ **[Submission Checklist](docs/SUBMISSION_CHECKLIST.md)** - Assignment completion tracker
 
 ### Notebooks
 
@@ -728,19 +724,19 @@ print(result)
 ## 🔒 Ethical Considerations
 
 ### Transparency
-- ✅ All predictions include ground truth comparison
-- ✅ Repair/override interventions clearly flagged
-- ✅ Model limitations documented
+- All predictions include ground truth comparison
+- Repair/override interventions clearly flagged
+- Model limitations documented
 
 ### Human-in-the-Loop
-- ✅ Critical (SEV-1) incidents flagged for manual review
-- ✅ System assists, doesn't replace, human judgment
-- ✅ Audit trail for all heuristic overrides
+- Critical (SEV-1) incidents flagged for manual review
+- System assists, doesn't replace, human judgment
+- Audit trail for all heuristic overrides
 
 ### Bias Monitoring
-- ✅ Stratified evaluation across severity levels
-- ✅ Performance tracked per incident type
-- ✅ No demographic data (no bias risk)
+- Stratified evaluation across severity levels
+- Performance tracked per incident type
+- No demographic data (no bias risk)
 
 ---
 
@@ -809,7 +805,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 [![GitHub stars](https://img.shields.io/github/stars/PragatiAN1109/incident-triage-llm?style=social)](https://github.com/PragatiAN1109/incident-triage-llm/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/PragatiAN1109/incident-triage-llm?style=social)](https://github.com/PragatiAN1109/incident-triage-llm/network/members)
 
-**[🚀 Try Live Demo](https://huggingface.co/spaces/Pragati1109/incident-triage-demo)** • **[📖 Read Technical Report](docs/technical_report.md)** • **[📊 View Results](results/evaluation_metrics.json)**
+**[🚀 Try Live Demo](https://huggingface.co/spaces/Pragati1109/incident-triage-demo)** • **[📖 Read Technical Report](docs/technical_report.md)**
 
 Made with ❤️ for automated incident response
 
