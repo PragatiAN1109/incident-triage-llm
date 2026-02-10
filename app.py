@@ -3,8 +3,8 @@ import json
 import re
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-# Load model and tokenizer
-MODEL_PATH = "PragatiAN1109/incident-triage-llm"  # Will be your HF model repo
+# Load model from local directory (uploaded to Space)
+MODEL_PATH = "./model"  # Local path in Space
 print("Loading model...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_PATH)
